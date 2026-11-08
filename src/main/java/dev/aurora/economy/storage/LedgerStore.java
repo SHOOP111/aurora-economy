@@ -195,6 +195,18 @@ public final class LedgerStore implements AutoCloseable {
             return List.copyOf(result);
         });
     }
+    public List<dev.aurora.economy.core.Models.Statement> statement(String account, int limit) {
+        return read(c -> {
+            List<dev.aurora.economy.core.Models.Statement> rows = new ArrayList<>();
+            try (var s = c.prepareStatement("SELECT j.*,e.currency,e.delta FROM journal j JOIN entries e ON e.tx_id=j.id WHERE e.account=? ORDER BY j.seq DESC,e.currency LIMIT ?")) {
+                s.setString(1, account); s.setInt(2, Math.max(1, Math.min(limit, 50)));
+                try (var rs = s.executeQuery()) {
+                    while (rs.next()) rows.add(new dev.aurora.economy.core.Models.Statement(receipt(rs, false), rs.getString("currency"), rs.getLong("delta")));
+                }
+            }
+            return List.copyOf(rows);
+        });
+    }
     private static Receipt receipt(ResultSet rs, boolean replay) throws SQLException {
         return new Receipt(rs.getString("id"), rs.getString("op_key"), rs.getString("kind"), rs.getString("reference"),
                 Instant.ofEpochMilli(rs.getLong("created_at")), rs.getString("hash"), replay);

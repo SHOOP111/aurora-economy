@@ -1,0 +1,31 @@
+name: AuroraEconomy
+version: '${version}'
+main: dev.aurora.economy.paper.AuroraEconomyPlugin
+api-version: '1.21'
+description: Auditable multi-currency economy with solvency-first banking and reserve-backed exchange.
+author: SHOOP111
+website: https://github.com/SHOOP111/aurora-economy
+softdepend: [Vault]
+commands:
+  economy:
+    aliases: [eco, aurora, money, balance, bal, pay]
+    description: Aurora economy dashboard and financial commands
+    usage: /eco help
+    permission: aurora.use
+permissions:
+  aurora.use:
+    default: true
+  aurora.pay:
+    default: true
+  aurora.bank:
+    default: true
+  aurora.escrow:
+    default: true
+  aurora.exchange:
+    default: true
+  aurora.orders:
+    default: true
+  aurora.balance.others:
+    default: op
+  aurora.admin:
+    default: op

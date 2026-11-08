@@ -102,9 +102,23 @@ public final class EconomyEngine {
             }
         });
     }
+    public boolean accountExists(UUID owner) {
+        return store.read(c -> scalar(c, "SELECT COUNT(*) FROM players WHERE uuid=?", owner.toString()) > 0);
+    }
     public long balance(UUID owner, String code) { return store.balance(wallet(owner), currency(code).code()); }
     public long treasury(String code) { return store.balance(TREASURY, currency(code).code()); }
     public List<Receipt> history(UUID player, int limit) { return store.history(wallet(player), limit); }
+    public List<Models.Statement> statement(UUID player, int limit) { return store.statement(wallet(player), limit); }
+    public List<Leader> leaders(String code, int limit) {
+        String currency = currency(code).code();
+        return store.read(c -> {
+            List<Leader> rows = new ArrayList<>();
+            try (var s = sql(c, "SELECT b.account,COALESCE(p.name,substr(b.account,8,36)),b.units FROM balances b LEFT JOIN players p ON b.account='player:'||p.uuid||':wallet' WHERE b.currency=? AND b.account LIKE 'player:%:wallet' ORDER BY b.units DESC,b.account LIMIT ?", currency, Math.max(1, Math.min(limit, 50))); var rs = s.executeQuery()) {
+                while (rs.next()) rows.add(new Leader(UUID.fromString(rs.getString(1).substring(7, 43)), rs.getString(2), rs.getLong(3)));
+            }
+            return List.copyOf(rows);
+        });
+    }
 
     public Receipt transfer(UUID owner, UUID recipient, String code, long amount, String request) {
         different(owner, recipient); Money.positive(amount); String currency = currency(code).code();
@@ -179,7 +193,7 @@ public final class EconomyEngine {
     public List<Escrow> escrows(UUID player) {
         return store.read(c -> {
             List<Escrow> result = new ArrayList<>();
-            try (var s = sql(c, "SELECT * FROM escrows WHERE owner=? OR beneficiary=? ORDER BY expires_at DESC LIMIT 100", player.toString(), player.toString()); var rs = s.executeQuery()) {
+            try (var s = sql(c, "SELECT * FROM escrows WHERE owner=? OR beneficiary=? ORDER BY (state='OPEN') DESC,expires_at DESC LIMIT 100", player.toString(), player.toString()); var rs = s.executeQuery()) {
                 while (rs.next()) result.add(mapEscrow(rs));
             }
             return List.copyOf(result);
@@ -226,7 +240,7 @@ public final class EconomyEngine {
     public List<Deposit> deposits(UUID owner) {
         return store.read(c -> {
             List<Deposit> result = new ArrayList<>();
-            try (var s = sql(c, "SELECT * FROM deposits WHERE owner=? ORDER BY unlock_at DESC LIMIT 100", owner.toString()); var rs = s.executeQuery()) {
+            try (var s = sql(c, "SELECT * FROM deposits WHERE owner=? ORDER BY (state='LOCKED') DESC,unlock_at DESC LIMIT 100", owner.toString()); var rs = s.executeQuery()) {
                 while (rs.next()) result.add(mapDeposit(rs));
             }
             return List.copyOf(result);
@@ -269,7 +283,7 @@ public final class EconomyEngine {
     public List<StandingOrder> orders(UUID owner) {
         return store.read(c -> {
             List<StandingOrder> result = new ArrayList<>();
-            try (var s = sql(c, "SELECT * FROM orders WHERE owner=? ORDER BY next_due DESC LIMIT 100", owner.toString()); var rs = s.executeQuery()) {
+            try (var s = sql(c, "SELECT * FROM orders WHERE owner=? ORDER BY (state IN ('ACTIVE','PAUSED')) DESC,next_due DESC LIMIT 100", owner.toString()); var rs = s.executeQuery()) {
                 while (rs.next()) result.add(mapOrder(rs));
             }
             return List.copyOf(result);

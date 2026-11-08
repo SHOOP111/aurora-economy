@@ -1,0 +1,31 @@
+# Aurora Economy - restart required after configuration changes.
+# Never remove a persisted currency or change its decimal precision.
+default-currency: COIN
+vault-enabled: true
+# Currency codes: 2-12 ASCII uppercase letters/digits, first character a letter.
+# Amount strings are exact decimals; daily-limit: '0' disables the cap.
+currencies:
+  COIN:
+    symbol: '$'
+    decimals: 2
+    starting-balance: '1000.00'
+    daily-limit: '50000.00'
+  GEM:
+    symbol: '♦'
+    decimals: 0
+    starting-balance: '0'
+    daily-limit: '10000'
+policy:
+  # 25 basis points = 0.25%; payer pays the fee on top; treasury receives it.
+  transfer-fee-bps: 25
+  # Fee remains in treasury-owned x*y=k exchange pools.
+  swap-fee-bps: 30
+  # Yield is reserved from treasury when a deposit is opened; no unfunded promises.
+  savings-apr-bps: 350
+  max-active-orders: 10
+  max-open-escrows: 20
+  max-open-deposits: 20
+worker:
+  # Bounded queue; excess requests fail before touching balances.
+  queue-capacity: 512
+  maintenance-seconds: 10

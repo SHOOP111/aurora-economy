@@ -14,6 +14,8 @@ public final class Models {
         }
     }
     public record Receipt(String id, String key, String kind, String reference, Instant time, String hash, boolean replayed) { }
+    public record Statement(Receipt receipt, String currency, long delta) { }
+    public record Leader(UUID player, String name, long units) { }
     public record Escrow(String id, UUID owner, UUID beneficiary, String currency, long amount,
                          long fee, Instant expires, String state) { }
     public record Deposit(String id, UUID owner, String currency, long principal, long interest,
