@@ -1,0 +1,12 @@
+.gradle/
+build/
+.idea/
+*.iml
+.vscode/
+run/
+*.db
+*.db-shm
+*.db-wal
+*.log
+.env
+.DS_Store
