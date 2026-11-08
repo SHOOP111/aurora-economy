@@ -2,11 +2,22 @@
 
 ## Scope and verification boundary
 
-This pass inspected the tracked application and test Java sources, resource YAML, Gradle configuration, wrapper scripts, workflow/reporting code, documentation and SVG asset. Existing tests were read as specifications, not executed or rewritten. Generated caches, Git internals and the binary Gradle wrapper are not application source and were not executed.
+This pass inspected the tracked application and test Java sources, resource YAML, Gradle configuration, wrapper scripts, workflow/reporting code, documentation and SVG asset. Existing tests were read as specifications during the initial review and subsequently executed unchanged on GitHub-hosted runners. Generated caches, Git internals and the binary Gradle wrapper are not application source.
 
-**No compiler, Gradle task, build, test runner, server, benchmark or packaging check was run.** Validation was limited to source/control-flow review, searches, diff inspection and Git whitespace checks. The published SQLite JDBC POM and release notes were read to confirm the dependency update; no driver was loaded.
+The initial review used source/control-flow analysis, searches, diff inspection and Git whitespace checks. The published SQLite JDBC POM and release notes were read to confirm the dependency update. A local wrapper download was interrupted before compilation/test tasks ran; no local build or tests completed. All completed compilation/test verification was performed through GitHub Actions after authorization.
 
-These changes address issues found through that review. They are not a proof that every possible bug has been eliminated, and no new passing-test or production-readiness claim is made.
+### GitHub verification evidence
+
+[Run 42502782490](https://github.com/SHOOP111/aurora-economy/actions/runs/42502782490), commit `bebf4fb41226beb5f69fef6900f5c4456bb47ac4`, passed on both `ubuntu-latest` and `windows-latest`:
+
+- Java compilation, `clean build`, coverage verification and plugin-JAR verification succeeded.
+- **153 tests per OS; 0 failures, 0 errors, 0 skipped.**
+- Core coverage: **95.4% lines / 69.0% branches**.
+- Storage coverage: **94.9% lines / 66.5% branches**.
+- Both jobs published shaded/thin/source JARs, test reports and coverage reports.
+- Native SQLite loading was exercised by the real-SQLite tests; packaged driver/service/Linux/Windows resources were checked.
+
+These changes address issues found through the review. Successful CI is not a proof that every possible bug has been eliminated and does not constitute a live-server or production-readiness certification.
 
 ## Findings addressed
 
@@ -48,11 +59,11 @@ These changes address issues found through that review. They are not a proof tha
 - An unlimited daily counter can now display its saturated maximum instead of blocking circulation.
 - A confirmed Vault mutation can return `SUCCESS` with `balance=NaN` if its balance cannot be read. Integrations must not retry that mutation. Use the exact async API instead of relying on legacy double behavior.
 - An evidence manifest with an incomplete audit uses `healthy=false`, counts `-1` and head `unavailable`. It is not a verified restore point.
-- The SQLite update was checked against the publisher's POM/release notes, but its native loading and packaged runtime compatibility were **not executed** here.
+- The SQLite update was checked against the publisher's POM/release notes and subsequently passed real-SQLite CI tests and packaging checks on both OSes. Live Paper compatibility was not executed.
 
 ## Remaining limitations and risks
 
-1. **Execution evidence is absent for this patch.** Compilation, coverage thresholds, migrations on real historical files, packaging and live Paper/Vault behavior remain unverified. Existing coverage gates may need additional authorized regression coverage; no tests were added or run in this pass.
+1. **CI covers only its defined scope.** Existing compilation, 153 tests, coverage gates and packaging checks passed remotely. Real historical production files, live Paper/Vault/GUI behavior, destructive fault injection and performance remain unverified. No new regression tests were added in this pass; additional targeted coverage is still valuable.
 2. **Installed plugins and operators remain trusted.** The engine/SQL connection are not a sandbox. Host access can remove triggers or rewrite a self-consistent chain; independently held backup anchors remain essential.
 3. **Not every mutable field is event-rebuilt.** Player-name metadata, some scheduling state/timestamps and the original recurring fee snapshot are not fully reconstructed from immutable events. New comparisons improve incident detection without claiming a complete event-sourcing rewrite.
 4. **Physical commit ambiguity remains possible.** A thrown `commit()` cannot safely be treated as proof that nothing persisted. Async clients must reuse their original keys. Vault has no client replay protocol.

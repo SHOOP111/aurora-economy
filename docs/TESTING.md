@@ -13,6 +13,10 @@ Push or open a pull request, then inspect [Actions](https://github.com/SHOOP111/
 
 Tag releases run the same Gradle `clean build`, generate SHA-256 checksums and publish only after success. The wrapper checksum and workflow wrapper validation protect against accidental wrapper substitution. Tests are not skipped to make release publishing faster.
 
+## Hardening review verification
+
+[GitHub Actions run 42502782490](https://github.com/SHOOP111/aurora-economy/actions/runs/42502782490) verified hardening commit `bebf4fb41226beb5f69fef6900f5c4456bb47ac4` on Linux and Windows: **153 tests per OS, zero failures/errors/skips**, successful compilation, coverage gates and JAR verification. Core coverage was 95.4% line / 69.0% branch; storage was 94.9% line / 66.5% branch. This is remote CI evidence, not live Minecraft acceptance. See [review notes](REVIEW.md).
+
 ## Automated coverage scope
 
 Tests use **real temporary SQLite databases**, the actual transaction engine and reproducible seeded traffic. Paper/Vault boundary tests mock Bukkit objects; they do not pretend to be a live server.

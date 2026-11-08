@@ -2,7 +2,7 @@
 
 ## Unreleased — static hardening review
 
-No build, compilation, tests or server execution were performed for this review.
+The initial review was static-only. Subsequent [GitHub Actions verification](https://github.com/SHOOP111/aurora-economy/actions/runs/42502782490) compiled the changes, passed all 153 tests on both Linux and Windows, passed coverage gates and verified packaged JAR contents. No local compilation/tests or live-server execution were completed.
 
 - Make player registration metadata/grants atomic, freeze-aware and safe across unknown offline names.
 - Restrict transaction handles to their live writer thread; reject nested writes; preserve rollback failures and confirmed commit receipts during cleanup faults.

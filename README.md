@@ -118,7 +118,7 @@ Financial mutation commands in the table accept a final optional `[request-id]`,
 
 ## Documentation
 
-- [Static review findings and unverified changes](docs/REVIEW.md)
+- [Hardening review findings and GitHub verification](docs/REVIEW.md)
 - [Architecture and transaction invariants](docs/ARCHITECTURE.md)
 - [Economic formulas and contract state machines](docs/ECONOMICS.md)
 - [Operations, backup and incident recovery](docs/OPERATIONS.md)

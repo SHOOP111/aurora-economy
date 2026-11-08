@@ -36,7 +36,7 @@ The ledger hash chain is unkeyed. SQL triggers can be removed by host/database a
 
 ## Known limitations
 
-- This hardening pass is static-only: no compilation, tests, packaging verification, load measurement or server execution was performed for these changes. See `docs/REVIEW.md` for scope and remaining risks.
+- This hardening pass subsequently passed GitHub Actions compilation, all 153 tests on both Linux and Windows, coverage gates and packaging checks. Live-server execution, load measurement and independent security certification remain unperformed. See `docs/REVIEW.md` for evidence and remaining risks.
 - New implementation: no independent security audit or long-running production certification.
 - No real Minecraft server/GUI acceptance test has been executed by this project; unit/integration tests use the core and mocked adapters.
 - No network-wide consistency, network-filesystem safety or Folia support.

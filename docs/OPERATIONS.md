@@ -16,7 +16,7 @@ Before production, review:
 
 Restart for configuration changes. Monetary amounts must remain quoted YAML strings; integer/boolean settings do not accept coercion from fractions, huge values or strings. Policy contract quotas are limited to 1–10000. Hot reload is deliberately unsupported; do not use `/reload` or third-party plugin reloaders for a live financial database.
 
-Before upgrading to schema v3, take a healthy snapshot using the old version and preserve its config. The v3 migration adds order revisions and query indexes without rewriting journal hashes, balances or contract amounts. Older v2 binaries refuse to open it; rollback requires restoring a pre-upgrade snapshot, not editing `user_version`. SQLite JDBC is upgraded to 3.54.1.0; this static review did not execute native-driver/server compatibility checks.
+Before upgrading to schema v3, take a healthy snapshot using the old version and preserve its config. The v3 migration adds order revisions and query indexes without rewriting journal hashes, balances or contract amounts. Older v2 binaries refuse to open it; rollback requires restoring a pre-upgrade snapshot, not editing `user_version`. SQLite JDBC is upgraded to 3.54.1.0; GitHub Actions subsequently passed real-SQLite tests and native-resource packaging checks on Windows and Linux. Live Paper/server compatibility still requires staging acceptance.
 
 ## Files
 
