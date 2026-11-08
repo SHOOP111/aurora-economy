@@ -255,6 +255,9 @@ public final class LedgerStore implements AutoCloseable {
                 }
             }
             if (projection.values().stream().anyMatch(n -> n.signum() != 0)) violations.add("Missing materialized balances");
+            try (var s = c.createStatement(); var rs = s.executeQuery("SELECT (SELECT COUNT(*) FROM balances WHERE typeof(units)<>'integer')+(SELECT COUNT(*) FROM entries WHERE typeof(delta)<>'integer')+(SELECT COUNT(*) FROM journal WHERE typeof(created_at)<>'integer')")) {
+                if (rs.next() && rs.getLong(1) != 0) violations.add("Non-integer monetary or timestamp storage detected");
+            }
             try (var s = c.createStatement(); var rs = s.executeQuery("PRAGMA foreign_key_check")) {
                 if (rs.next()) violations.add("Foreign key integrity violation");
             }

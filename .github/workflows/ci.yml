@@ -30,6 +30,10 @@ jobs:
       - name: Compile, test, generate coverage and package
         shell: bash
         run: bash ./gradlew --no-daemon clean build
+      - name: Test and coverage summary
+        if: always()
+        shell: bash
+        run: python .github/scripts/report.py
       - name: Upload plugin and reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Aurora Economy</title>
+  <desc id="desc">Auditable money for ambitious Minecraft worlds. Exact money, atomic ledger, funded yield, protected trades.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#071422"/><stop offset="1" stop-color="#112839"/></linearGradient>
+    <linearGradient id="aurora" x2="1" y2="0"><stop stop-color="#57ead3"/><stop offset=".5" stop-color="#76aaff"/><stop offset="1" stop-color="#ad87f6"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#57ead3" stop-opacity=".18"/><stop offset="1" stop-color="#57ead3" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#7dbcc9" stroke-opacity=".07"/></pattern>
+  </defs>
+  <rect width="1200" height="360" rx="20" fill="url(#bg)"/>
+  <rect width="1200" height="360" rx="20" fill="url(#grid)"/>
+  <ellipse cx="920" cy="140" rx="340" ry="300" fill="url(#glow)"/>
+  <path d="M660 220C775 70 860 325 1005 112S1195 60 1230 85" fill="none" stroke="url(#aurora)" stroke-width="2" opacity=".6"/>
+  <path d="M640 240C780 90 915 350 1040 148S1190 120 1240 125" fill="none" stroke="url(#aurora)" stroke-width="1" opacity=".25"/>
+  <text x="64" y="66" font-family="sans-serif" font-size="14" font-weight="700" letter-spacing="4" fill="#57ead3">SOLVENCY FIRST. INTEGRITY ALWAYS.</text>
+  <text x="60" y="148" font-family="sans-serif" font-size="76" font-weight="800" letter-spacing="6" fill="#edf8ff">AURORA</text>
+  <text x="64" y="186" font-family="sans-serif" font-size="22" letter-spacing="9" fill="#93b9ce">ECONOMY</text>
+  <text x="64" y="236" font-family="sans-serif" font-size="19" fill="#d1e1ea">Auditable money for ambitious Minecraft worlds.</text>
+  <g fill="#b9d2df" font-family="sans-serif" font-size="12" letter-spacing="1">
+    <rect x="64" y="270" width="140" height="34" rx="7" fill="#152f3d"/><text x="82" y="292">EXACT MONEY</text>
+    <rect x="214" y="270" width="150" height="34" rx="7" fill="#152f3d"/><text x="230" y="292">ATOMIC LEDGER</text>
+    <rect x="374" y="270" width="139" height="34" rx="7" fill="#152f3d"/><text x="390" y="292">FUNDED YIELD</text>
+    <rect x="523" y="270" width="174" height="34" rx="7" fill="#152f3d"/><text x="538" y="292">PROTECTED TRADES</text>
+  </g>
+  <g stroke="#57ead3" fill="#102b39">
+    <path d="M828 114L917 69L1006 114V215L917 260L828 215Z" stroke-opacity=".25"/>
+    <path d="M845 124L917 87L989 124V204L917 242L845 204Z" stroke-opacity=".5"/>
+    <path d="M877 140L917 119L957 140V183L917 204L877 183Z" stroke-width="2"/>
+    <path d="M877 140L917 162L957 140M917 162V204" fill="none" stroke-width="2"/>
+    <circle cx="828" cy="114" r="5" fill="#57ead3"/><circle cx="1006" cy="215" r="5" fill="#76aaff" stroke="#76aaff"/>
+    <circle cx="917" cy="69" r="5" fill="#ad87f6" stroke="#ad87f6"/>
+  </g>
+  <text x="835" y="299" font-family="monospace" font-size="14" fill="#57ead3">Σ postings = 0</text>
+  <text x="835" y="323" font-family="monospace" font-size="12" fill="#84a7bb">every currency · every commit</text>
+</svg>

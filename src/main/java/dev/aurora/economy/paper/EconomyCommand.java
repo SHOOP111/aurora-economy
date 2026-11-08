@@ -78,17 +78,19 @@ final class EconomyCommand implements TabExecutor {
         run(sender, () -> plugin.engine().portfolio(owner == null ? plugin.engine().resolve(args[1]) : owner), portfolio -> showPortfolio(sender, portfolio));
     }
     private void showPortfolio(CommandSender sender, Portfolio p) {
+        if (p.frozen()) plugin.reply(sender, Component.text("WALLET FROZEN: " + p.freezeReason(), NamedTextColor.RED));
         for (Currency c : plugin.engine().currencies()) say(sender, c.code() + " • wallet " + c.format(p.wallets().get(c.code())) + " • savings " + c.format(p.lockedSavings().get(c.code())) + " • escrow " + c.format(p.escrowHeld().get(c.code())));
     }
     private void pay(CommandSender sender, String[] args) {
         permit(sender, "aurora.pay");
-        if (args.length < 3 || args.length > 4) throw usage("/eco pay <player> <amount> [currency]");
-        UUID owner = player(sender).getUniqueId(); Currency c = plugin.engine().currency(args.length == 4 ? args[3] : plugin.settings().defaultCurrency());
-        long amount = c.parse(args[2]); String request = request();
+        if (args.length < 3 || args.length > 5) throw usage("/eco pay <player> <amount> [currency] [request-id]");
+        UUID owner = player(sender).getUniqueId(); Currency c = plugin.engine().currency(args.length >= 4 ? args[3] : plugin.settings().defaultCurrency());
+        long amount = c.parse(args[2]); String request = args.length == 5 ? args[4] : request();
+        plugin.reply(sender, Component.text("Payment request: ", NamedTextColor.GRAY).append(copy(request)));
         run(sender, () -> plugin.engine().transfer(owner, plugin.engine().resolve(args[1]), c.code(), amount, request), receipt -> {
             success(sender, receipt);
             Player recipient = plugin.getServer().getPlayer(UUID.fromString(receipt.reference()));
-            if (recipient != null) say(recipient, "Received " + c.format(amount) + " from " + sender.getName() + ".");
+            if (recipient != null && !receipt.replayed()) say(recipient, "Received " + c.format(amount) + " from " + sender.getName() + ".");
         });
     }
     private void bank(CommandSender sender, String[] args) {
@@ -192,7 +194,14 @@ final class EconomyCommand implements TabExecutor {
             }
             case "backup" -> {
                 exact(args, 2, "/eco admin backup"); var path = plugin.getDataFolder().toPath().resolve("backups/economy-" + UUID.randomUUID() + ".db");
-                run(sender, () -> plugin.store().backup(path), result -> say(sender, "Consistent SQLite snapshot saved: " + result.getFileName() + ". Keep it off-server with its audit head."));
+                run(sender, () -> plugin.engine().backup(path), result -> say(sender, "Consistent SQLite snapshot + audit manifest saved: " + result.database().getFileName() + ". Keep both off-server."));
+            }
+            case "freeze", "unfreeze" -> {
+                boolean frozen = args[1].equalsIgnoreCase("freeze");
+                if (frozen && args.length < 4) throw usage("/eco admin freeze <player> <reason>");
+                if (!frozen) exact(args, 3, "/eco admin unfreeze <player>");
+                String reason = frozen ? String.join(" ", Arrays.copyOfRange(args, 3, args.length)) : "Administrator released wallet";
+                run(sender, () -> plugin.engine().setFrozen(actor, plugin.engine().resolve(args[2]), frozen, reason, request()), receipt -> success(sender, receipt));
             }
             case "inspect" -> {
                 exact(args, 3, "/eco admin inspect <player>"); run(sender, () -> plugin.engine().portfolio(plugin.engine().resolve(args[2])), result -> showPortfolio(sender, result));
@@ -206,7 +215,7 @@ final class EconomyCommand implements TabExecutor {
         });
     }
     private void success(CommandSender sender, Receipt receipt) {
-        plugin.reply(sender, Component.text(receipt.kind() + " committed. Receipt ", NamedTextColor.GREEN).append(copy(receipt.id())));
+        plugin.reply(sender, Component.text(receipt.kind() + (receipt.replayed() ? " already committed (safe replay). Receipt " : " committed. Receipt "), NamedTextColor.GREEN).append(copy(receipt.id())));
     }
     private void contractSuccess(CommandSender sender, Receipt receipt, String action) {
         success(sender, receipt); plugin.reply(sender, Component.text("Contract (click to prepare action): ", NamedTextColor.GRAY).append(contract(receipt.reference(), action)));
@@ -244,8 +253,8 @@ final class EconomyCommand implements TabExecutor {
     private static String request() { return UUID.randomUUID().toString(); }
     private void help(CommandSender sender) {
         say(sender, "Aurora Economy • amounts are exact decimals • fees are charged on top of payments");
-        for (String line : List.of("/eco — financial dashboard", "/eco wallet [player] | /eco top [currency] | /eco history", "/pay <player> <amount> [currency]", "/eco bank list [page] | deposit <amount> <currency> <days> | claim <id>", "/eco escrow list [page] | create <player> <amount> <currency> <minutes> | accept/cancel <id>", "/eco orders list [page] | create <player> <amount> <currency> <minutes> <repetitions> | resume/cancel <id>", "/eco exchange quote <from> <to> <amount>", "/eco exchange swap <from> <to> <amount> <minimum-output>")) say(sender, line);
-        if (sender.hasPermission("aurora.admin")) say(sender, "/eco admin mint/burn <player|treasury> <amount> <currency> | liquidity <a> <b> <amount-a> <amount-b> | supply | audit | backup | inspect <player>");
+        for (String line : List.of("/eco — financial dashboard", "/eco wallet [player] | /eco top [currency] | /eco history", "/pay <player> <amount> [currency] [request-id]", "/eco bank list [page] | deposit <amount> <currency> <days> | claim <id>", "/eco escrow list [page] | create <player> <amount> <currency> <minutes> | accept/cancel <id>", "/eco orders list [page] | create <player> <amount> <currency> <minutes> <repetitions> | resume/cancel <id>", "/eco exchange quote <from> <to> <amount>", "/eco exchange swap <from> <to> <amount> <minimum-output>")) say(sender, line);
+        if (sender.hasPermission("aurora.admin")) say(sender, "/eco admin mint/burn <player|treasury> <amount> <currency> | liquidity <a> <b> <amount-a> <amount-b> | supply | audit | backup | inspect <player> | freeze <player> <reason> | unfreeze <player>");
     }
     @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] original) {
         if (!sender.hasPermission("aurora.use")) return List.of();
@@ -260,7 +269,7 @@ final class EconomyCommand implements TabExecutor {
                 case "escrow" -> sender.hasPermission("aurora.escrow") ? List.of("list", "create", "accept", "cancel") : List.of();
                 case "orders" -> sender.hasPermission("aurora.orders") ? List.of("list", "create", "resume", "cancel") : List.of();
                 case "exchange" -> sender.hasPermission("aurora.exchange") ? List.of("quote", "swap") : List.of();
-                case "admin" -> sender.hasPermission("aurora.admin") ? List.of("mint", "burn", "liquidity", "supply", "audit", "backup", "inspect") : List.of();
+                case "admin" -> sender.hasPermission("aurora.admin") ? List.of("mint", "burn", "liquidity", "supply", "audit", "backup", "inspect", "freeze", "unfreeze") : List.of();
                 case "top" -> plugin.engine().currencies().stream().map(Currency::code).toList();
                 case "pay", "wallet" -> plugin.getServer().getOnlinePlayers().stream().map(Player::getName).toList();
                 default -> List.of();

@@ -14,8 +14,9 @@ final class Schema {
             s.execute("PRAGMA synchronous=FULL");
             int version;
             try (var rs = s.executeQuery("PRAGMA user_version")) { rs.next(); version = rs.getInt(1); }
-            if (version > 1) throw new SQLException("Database is newer than this plugin; downgrade refused");
-            if (version == 1) return;
+            if (version > 2) throw new SQLException("Database is newer than this plugin; downgrade refused");
+            if (version == 2) return;
+            if (version == 1) { addWalletControls(c); return; }
         }
         c.setAutoCommit(false);
         try (Statement s = c.createStatement()) {
@@ -75,6 +76,18 @@ final class Schema {
             }
             s.execute("PRAGMA user_version=1");
             c.commit();
+        } catch (SQLException e) { c.rollback(); throw e; }
+        finally { c.setAutoCommit(true); }
+        addWalletControls(c);
+    }
+    private static void addWalletControls(Connection c) throws SQLException {
+        c.setAutoCommit(false);
+        try (Statement s = c.createStatement()) {
+            s.execute("""
+                CREATE TABLE wallet_controls(owner TEXT PRIMARY KEY, frozen INTEGER NOT NULL CHECK(frozen IN (0,1)),
+                    reason TEXT NOT NULL, updated_at INTEGER NOT NULL) STRICT
+                """);
+            s.execute("PRAGMA user_version=2"); c.commit();
         } catch (SQLException e) { c.rollback(); throw e; }
         finally { c.setAutoCommit(true); }
     }

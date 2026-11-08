@@ -6,7 +6,7 @@ public final class EconomyException extends RuntimeException {
     public enum Code {
         INVALID_AMOUNT, UNKNOWN_CURRENCY, INSUFFICIENT_FUNDS, DAILY_LIMIT,
         IDEMPOTENCY_CONFLICT, NOT_FOUND, FORBIDDEN, INVALID_STATE, EXPIRED,
-        LOCKED, SLIPPAGE, NO_LIQUIDITY, LIMIT_REACHED, STORAGE, INTEGRITY
+        LOCKED, ACCOUNT_FROZEN, SLIPPAGE, NO_LIQUIDITY, LIMIT_REACHED, STORAGE, INTEGRITY
     }
     private final Code code;
     public EconomyException(Code code, String message) { super(message); this.code = code; }

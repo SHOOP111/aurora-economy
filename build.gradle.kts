@@ -86,6 +86,18 @@ val verifyPluginJar by tasks.registering {
         }
     }
 }
-tasks.check { dependsOn(verifyPluginJar) }
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.jacocoTestReport)
+    classDirectories.setFrom(sourceSets.main.get().output.asFileTree.matching {
+        include("dev/aurora/economy/core/**", "dev/aurora/economy/storage/**")
+    })
+    violationRules {
+        rule {
+            limit { counter = "LINE"; minimum = "0.80".toBigDecimal() }
+            limit { counter = "BRANCH"; minimum = "0.65".toBigDecimal() }
+        }
+    }
+}
+tasks.check { dependsOn(verifyPluginJar, tasks.jacocoTestCoverageVerification) }
 tasks.jar { archiveClassifier.set("thin") }
 tasks.build { dependsOn(tasks.shadowJar) }

@@ -48,7 +48,7 @@ final class Dashboard implements Listener {
             wallet.add(c.format(p.wallets().get(c.code()))); savings.add(c.format(p.lockedSavings().get(c.code()))); held.add(c.format(p.escrowHeld().get(c.code())));
             budget.add(c.code() + ": " + c.decimal(p.spentToday().get(c.code())) + " / " + (c.dailyLimit() == 0 ? "unlimited" : c.decimal(c.dailyLimit())));
         }
-        wallet.add("Click to view wallets."); savings.add("Promised yield is already reserved."); savings.add("Click to list your deposit contracts.");
+        wallet.add(p.frozen() ? "FROZEN: " + p.freezeReason() : "Click to view wallets."); savings.add("Promised yield is already reserved."); savings.add("Click to list your deposit contracts.");
         held.add("Click to list incoming and outgoing escrows.");
         inventory.setItem(10, icon(Material.GOLD_INGOT, "Liquid wallets", wallet));
         inventory.setItem(12, icon(Material.ENDER_CHEST, "Solvency-first savings", savings));

@@ -25,8 +25,10 @@ public final class Models {
                                 int totalExecutions, String state, String reason) { }
     public record Quote(String from, String to, long input, long output, long reserveIn, long reserveOut,
                         int feeBps, Instant time) { }
+    public record WalletControl(UUID owner, boolean frozen, String reason, Instant updated) { }
     public record Portfolio(Map<String, Long> wallets, Map<String, Long> lockedSavings,
-                            Map<String, Long> escrowHeld, Map<String, Long> spentToday) {
+                            Map<String, Long> escrowHeld, Map<String, Long> spentToday,
+                            boolean frozen, String freezeReason) {
         public Portfolio {
             wallets = Map.copyOf(wallets); lockedSavings = Map.copyOf(lockedSavings);
             escrowHeld = Map.copyOf(escrowHeld); spentToday = Map.copyOf(spentToday);
@@ -34,6 +36,7 @@ public final class Models {
     }
     public record Supply(String currency, long issued, long wallets, long savings, long escrow,
                          long treasury, long markets) { }
+    public record Backup(java.nio.file.Path database, java.nio.file.Path manifest, Audit audit) { }
     public record Audit(long transactions, long postings, String headHash, List<String> violations) {
         public Audit { violations = List.copyOf(violations); }
         public boolean healthy() { return violations.isEmpty(); }
