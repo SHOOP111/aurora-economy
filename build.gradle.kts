@@ -18,7 +18,7 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
-    implementation("org.xerial:sqlite-jdbc:3.49.1.0") { exclude(group = "org.slf4j", module = "slf4j-api") }
+    implementation("org.xerial:sqlite-jdbc:3.54.1.0") { exclude(group = "org.slf4j", module = "slf4j-api") }
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
