@@ -448,6 +448,7 @@ public final class EconomyEngine {
                 for (long value : new long[]{s.wallets(), s.savings(), s.escrow(), s.treasury(), s.markets()}) total = total.add(BigInteger.valueOf(value));
                 if (!total.equals(BigInteger.valueOf(s.issued()))) errors.add("Supply mismatch: " + s.currency());
             }
+            if (!errors.isEmpty()) store.freeze();
             return new Audit(ledger.transactions(), ledger.postings(), ledger.headHash(), errors);
         });
     }

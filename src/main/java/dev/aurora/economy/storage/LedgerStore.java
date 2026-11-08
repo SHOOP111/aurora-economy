@@ -38,6 +38,9 @@ public final class LedgerStore implements AutoCloseable {
     private final FileChannel guardChannel;
     private final FileLock guard;
     private boolean closed;
+    private volatile boolean frozen;
+    public void freeze() { frozen = true; }
+    public boolean frozen() { return frozen; }
 
     @FunctionalInterface public interface SqlRead<T> { T read(Connection c) throws SQLException; }
     @FunctionalInterface public interface Work { String apply(Tx tx) throws SQLException; }
@@ -118,7 +121,9 @@ public final class LedgerStore implements AutoCloseable {
         }
         lock.lock();
         try {
-            ensureOpen(); connection.setAutoCommit(false);
+            ensureOpen();
+            if (frozen) throw new EconomyException(EconomyException.Code.INTEGRITY, "Ledger is frozen after a failed audit. Stop the server and investigate.");
+            connection.setAutoCommit(false);
             try {
                 try (var s = connection.prepareStatement("SELECT * FROM journal WHERE op_key=?")) {
                     s.setString(1, key);

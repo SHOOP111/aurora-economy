@@ -20,7 +20,7 @@ final class VaultBridge implements Economy {
     private final AuroraEconomyPlugin plugin;
     private final EconomyEngine engine;
     private final Currency currency;
-    private VaultBridge(AuroraEconomyPlugin plugin) {
+    VaultBridge(AuroraEconomyPlugin plugin) {
         this.plugin = plugin; engine = plugin.engine(); currency = engine.currency(plugin.settings().defaultCurrency());
     }
     static void register(AuroraEconomyPlugin plugin) {
@@ -43,7 +43,9 @@ final class VaultBridge implements Economy {
             return new EconomyResponse(amount, balance(owner), ResponseType.SUCCESS, "");
         } catch (EconomyException e) {
             if (e.code() == EconomyException.Code.STORAGE || e.code() == EconomyException.Code.INTEGRITY) plugin.getLogger().log(Level.SEVERE, "Vault operation failed", e);
-            return new EconomyResponse(0, 0, ResponseType.FAILURE, e.code() + ": " + e.getMessage());
+            double current = 0;
+            try { current = balance(owner); } catch (EconomyException ignored) { /* storage failed closed */ }
+            return new EconomyResponse(0, current, ResponseType.FAILURE, e.code() + ": " + e.getMessage());
         }
     }
     private EconomyResponse mutate(String name, double amount, boolean withdraw) {
