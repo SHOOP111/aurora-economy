@@ -3,7 +3,7 @@ import java.util.zip.ZipFile
 plugins {
     java
     jacoco
-    id("com.gradleup.shadow") version "8.3.6"
+    id("com.gradleup.shadow") version "9.6.1"
 }
 
 group = "dev.aurora"
