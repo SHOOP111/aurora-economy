@@ -8,6 +8,9 @@ plugins {
 
 group = "dev.aurora"
 version = providers.gradleProperty("releaseVersion").getOrElse("1.0.0")
+require(version.toString().matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?"))) {
+    "releaseVersion must be a safe semantic version, e.g. 1.0.0 or 1.0.1-rc.1"
+}
 
 repositories {
     mavenCentral()
@@ -18,7 +21,7 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
-    implementation("org.xerial:sqlite-jdbc:3.49.1.0") { exclude(group = "org.slf4j", module = "slf4j-api") }
+    implementation("org.xerial:sqlite-jdbc:3.54.1.0") { exclude(group = "org.slf4j", module = "slf4j-api") }
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
@@ -62,6 +65,7 @@ tasks.jacocoTestReport {
 tasks.shadowJar {
     archiveClassifier.set("")
     mergeServiceFiles()
+    manifest { attributes["Multi-Release"] = "true" }
     // SQLite contains native resources. Do not relocate or minimize its driver.
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
 }

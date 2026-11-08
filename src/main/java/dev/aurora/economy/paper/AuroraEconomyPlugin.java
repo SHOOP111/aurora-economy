@@ -13,6 +13,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
@@ -32,7 +33,10 @@ public final class AuroraEconomyPlugin extends JavaPlugin implements Listener {
     private Settings settings;
     private ThreadPoolExecutor worker;
     private Dashboard dashboard;
+    private volatile boolean stopping;
+    private final AtomicBoolean maintenancePending = new AtomicBoolean();
     @Override public void onEnable() {
+        stopping = false;
         try {
             saveDefaultConfig(); settings = Settings.load(getConfig());
             Clock clock = Clock.systemUTC();
@@ -52,9 +56,14 @@ public final class AuroraEconomyPlugin extends JavaPlugin implements Listener {
             getServer().getServicesManager().register(EconomyApi.class, new DefaultEconomyApi(engine, worker), this, ServicePriority.Normal);
             if (settings.vault() && getServer().getPluginManager().isPluginEnabled("Vault")) VaultBridge.register(this);
             long ticks = settings.maintenanceSeconds() * 20L;
-            getServer().getScheduler().runTaskTimer(this, () -> async(engine::maintain).whenComplete((report, error) -> {
-                if (error != null && !(unwrap(error) instanceof RejectedExecutionException)) getLogger().log(Level.SEVERE, "Maintenance failed", unwrap(error));
-            }), ticks, ticks);
+            getServer().getScheduler().runTaskTimer(this, () -> {
+                // A slow audit/backup must not accumulate redundant maintenance requests.
+                if (!maintenancePending.compareAndSet(false, true)) return;
+                async(engine::maintain).whenComplete((report, error) -> {
+                    maintenancePending.set(false);
+                    if (error != null && !(unwrap(error) instanceof RejectedExecutionException)) getLogger().log(Level.SEVERE, "Maintenance failed", unwrap(error));
+                });
+            }, ticks, ticks);
             for (Player player : getServer().getOnlinePlayers()) registerPlayer(player);
             getLogger().info("Aurora ready: " + settings.currencies().size() + " currencies; " + audit.transactions() + " verified transactions. Head " + audit.headHash());
         } catch (Exception e) {
@@ -65,20 +74,34 @@ public final class AuroraEconomyPlugin extends JavaPlugin implements Listener {
     @EventHandler public void joined(PlayerJoinEvent event) { registerPlayer(event.getPlayer()); }
     private void registerPlayer(Player player) {
         var id = player.getUniqueId(); var name = player.getName();
-        async(() -> engine.register(id, name)).whenComplete((receipt, error) -> { if (error != null) failure(player, error); });
+        async(() -> engine.register(id, name)).whenComplete((receipt, error) -> {
+            if (error == null) return;
+            if (unwrap(error) instanceof RejectedExecutionException && !stopping) {
+                main(() -> {
+                    if (!player.isOnline()) return;
+                    getServer().getScheduler().runTaskLater(this, () -> { if (!stopping && player.isOnline()) registerPlayer(player); }, 20L);
+                });
+            } else failure(player, error);
+        });
     }
     @Override public void onDisable() {
+        stopping = true;
         getServer().getScheduler().cancelTasks(this);
+        if (dashboard != null) {
+            try { dashboard.closeAll(); } catch (RuntimeException e) { getLogger().log(Level.WARNING, "Dashboard close failed; continuing ledger shutdown", e); }
+        }
         getServer().getServicesManager().unregisterAll(this);
         if (worker != null) {
             worker.shutdown();
-            try {
-                // Never drop queued writes silently. Shutdown waits for accepted requests to drain.
-                if (!worker.awaitTermination(30, TimeUnit.SECONDS)) {
+            boolean interrupted = false;
+            // Even an interrupted shutdown must drain accepted work before closing its connection.
+            for (;;) {
+                try {
+                    if (worker.awaitTermination(30, TimeUnit.SECONDS)) break;
                     getLogger().warning("Ledger queue is still draining; waiting for safe shutdown.");
-                    while (!worker.awaitTermination(30, TimeUnit.SECONDS)) getLogger().warning("Still draining ledger queue.");
-                }
-            } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                } catch (InterruptedException e) { interrupted = true; }
+            }
+            if (interrupted) Thread.currentThread().interrupt();
         }
         if (store != null) {
             try { store.close(); } catch (RuntimeException e) { getLogger().log(Level.SEVERE, "Database close failed", e); }
@@ -90,17 +113,18 @@ public final class AuroraEconomyPlugin extends JavaPlugin implements Listener {
     Dashboard dashboard() { return dashboard; }
     <T> CompletableFuture<T> async(Supplier<T> operation) {
         try {
-            if (worker == null || worker.isShutdown()) throw new RejectedExecutionException("Economy unavailable");
+            if (stopping || worker == null || worker.isShutdown()) throw new RejectedExecutionException("Economy unavailable");
             return CompletableFuture.supplyAsync(operation, worker);
         } catch (RejectedExecutionException e) { return CompletableFuture.failedFuture(e); }
     }
     void main(Runnable task) {
-        if (!isEnabled()) return;
-        if (Bukkit.isPrimaryThread()) task.run();
-        else {
-            try { getServer().getScheduler().runTask(this, () -> { if (isEnabled()) task.run(); }); }
-            catch (org.bukkit.plugin.IllegalPluginAccessException ignored) { /* shutdown race; ledger result remains durable */ }
-        }
+        if (stopping || !isEnabled()) return;
+        if (Bukkit.isPrimaryThread()) task.run(); else nextTick(task);
+    }
+    void nextTick(Runnable task) {
+        if (stopping || !isEnabled()) return;
+        try { getServer().getScheduler().runTask(this, () -> { if (!stopping && isEnabled()) task.run(); }); }
+        catch (org.bukkit.plugin.IllegalPluginAccessException ignored) { /* shutdown race; ledger result remains durable */ }
     }
     void reply(CommandSender sender, Component text) {
         main(() -> { if (!(sender instanceof Player player) || player.isOnline()) sender.sendMessage(Component.text("Aurora › ", NamedTextColor.GOLD).append(text)); });

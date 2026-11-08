@@ -1,10 +1,11 @@
 package dev.aurora.economy.storage;
 
 import dev.aurora.economy.core.Models.Posting;
-import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -17,8 +18,8 @@ public final class HashChain {
     public static String digest(String previous, String id, String key, String intent, String kind,
                                 String actor, String reference, long time, List<Posting> postings) {
         try {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            try (DataOutputStream out = new DataOutputStream(buffer)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (DataOutputStream out = new DataOutputStream(new DigestOutputStream(OutputStream.nullOutputStream(), digest))) {
                 out.writeInt(1);
                 for (String value : List.of(previous, id, key, intent, kind, actor, reference)) {
                     byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
@@ -33,7 +34,7 @@ public final class HashChain {
                     out.writeLong(entry.delta());
                 }
             }
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(buffer.toByteArray()));
+            return HexFormat.of().formatHex(digest.digest());
         } catch (IOException | NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
 }

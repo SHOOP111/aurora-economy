@@ -6,7 +6,9 @@ A currency's scale is fixed when first persisted. For COIN with two decimals, `1
 
 No commas, signs, exponent notation, NaN, infinity, excess meaningful fractional digits or overflow are accepted. Trailing zeros that represent an exact minor-unit amount are harmless. Configured starter amounts and limits may be zero.
 
-The maximum supported issued supply is `Long.MAX_VALUE` minor units per currency. Supply is bounded as well as individual balances, so an accumulation across many accounts cannot silently exceed the representable currency range.
+The maximum supported issued supply is `Long.MAX_VALUE` minor units per currency. Supply is bounded as well as individual balances, so an accumulation across many accounts cannot silently exceed the representable currency range. Public yield calculations also translate a final-result overflow into the standard invalid-amount error.
+
+Monetary configuration values are quoted strings subject to the same 32-character exact parser, including zero. Currency codes are validated as ASCII before case normalization, and symbols cannot contain control characters. Fractional/out-of-range integer settings and nonboolean enablement settings are rejected rather than silently coerced.
 
 ### Transfer fee
 
@@ -122,6 +124,8 @@ Each currency has an independent optional daily outgoing limit. `0` disables the
 Counted: payment principal plus fee, escrow amount plus reserved fee, swaps' input, recurring installments and external Vault withdrawals.
 
 Not counted: incoming payments, treasury administration, first-registration issuance, internal savings lock/claim movements and refunds. Refunding escrow does not reduce the recorded budget. Counters reset by UTC date, not by a rolling 24-hour window or a player's local time zone.
+
+With an unlimited budget, repeated circulation can exceed a signed-long cumulative counter without increasing issued supply. The recorded daily counter then saturates at `Long.MAX_VALUE`; it does not wrap or block otherwise valid spending. Capped-budget comparisons are overflow-safe and report `DAILY_LIMIT` when exceeded.
 
 ## Suggested server balancing
 

@@ -3,9 +3,14 @@ on:
   push:
     tags: ['v*']
 permissions:
-  contents: write
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   release:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -15,6 +20,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          validate-wrappers: true
       - run: bash ./gradlew --no-daemon -PreleaseVersion="${GITHUB_REF_NAME#v}" clean build
       - name: Checksums
         run: cd build/libs && sha256sum *.jar > SHA256SUMS

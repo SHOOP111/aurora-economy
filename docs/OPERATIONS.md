@@ -14,7 +14,9 @@ Before production, review:
 - permission defaults and authentication mode;
 - durable disk capacity and backup location.
 
-Restart for configuration changes. Hot reload is deliberately unsupported; do not use `/reload` or third-party plugin reloaders for a live financial database.
+Restart for configuration changes. Monetary amounts must remain quoted YAML strings; integer/boolean settings do not accept coercion from fractions, huge values or strings. Policy contract quotas are limited to 1–10000. Hot reload is deliberately unsupported; do not use `/reload` or third-party plugin reloaders for a live financial database.
+
+Before upgrading to schema v3, take a healthy snapshot using the old version and preserve its config. The v3 migration adds order revisions and query indexes without rewriting journal hashes, balances or contract amounts. Older v2 binaries refuse to open it; rollback requires restoring a pre-upgrade snapshot, not editing `user_version`. SQLite JDBC is upgraded to 3.54.1.0; this static review did not execute native-driver/server compatibility checks.
 
 ## Files
 
@@ -61,7 +63,7 @@ Move **both database and manifest** to access-controlled off-server storage. Est
 
 Never simply copy `economy.db` while the server is live and assume it includes committed WAL transactions. Use the backup command, SQLite's own supported backup facilities, or a clean offline shutdown.
 
-A backup can still be produced from a globally frozen ledger for incident evidence. `healthy=false` means evidence, **not a trusted restore point**. A manifest-write failure is reported even if its database snapshot was already created; inspect server logs and disk permissions before retrying.
+A backup can still be produced from a globally frozen ledger for incident evidence. `healthy=false` means evidence, **not a trusted restore point**. If the deep audit cannot complete but SQLite remains readable, its manifest records `transactions=-1`, `postings=-1` and `ledger_head=unavailable` rather than inventing a verified head. The command explicitly warns about such snapshots. Snapshot destinations and existing manifests are never intentionally overwritten. A manifest-write failure is reported even if its database snapshot was already created; inspect server logs and disk permissions before retrying.
 
 ## Restore drill
 
@@ -96,7 +98,7 @@ The normal command path is asynchronous, bounded and serialized. Financial commi
 
 Large audits reconstruct history and use memory proportional to accounts; snapshots copy the entire database. Both hold the ledger lock. Schedule them during quiet periods. **Vault is synchronous and may wait behind these operations on the main thread.** Prefer Aurora's async API for new integrations, or disable the Vault bridge where legacy compatibility is unnecessary.
 
-Contract lists retain at most 100 recent records, with open/locked/active contracts sorted first; chat pages contain eight records. Maintenance batches expired/due work in groups of at most 100 per category. Monitor queue saturation, due-work latency, storage growth and server tick time under your real workload.
+Contract lists retain at most 100 recent records, with open/locked/active contracts sorted first; chat pages contain eight records. Maintenance batches expired/due work in groups of at most 100 per category, with at most one pending maintenance request. Portfolio totals use grouped currency queries; indexed history/ranking/ownership lookups avoid repeated full-journal scans. Monitor queue saturation, due-work latency, storage growth and server tick time under your real workload.
 
 No throughput or "unlimited players" claim is made without workload-specific profiling. There is no archival/pruning command in v1.0; immutable history grows over time.
 
@@ -114,4 +116,4 @@ Use only one active primary economy provider. Aurora registers its default curre
 
 Vault bank calls honestly return `NOT_IMPLEMENTED`; Aurora's individual funded savings contracts are not generic Vault bank accounts. Per-world overloads use the same global wallet. Legacy name overloads resolve only known names/UUIDs and never perform blocking Mojang lookup.
 
-Watch ledger entries labeled `VAULT_DEPOSIT` and `VAULT_WITHDRAW`. Trusted shop/reward plugins can issue/burn through those methods. A compromised plugin has host-level trust and cannot be made safe merely by economy permissions.
+Watch ledger entries labeled `VAULT_DEPOSIT` and `VAULT_WITHDRAW`. Trusted shop/reward plugins can issue/burn through those methods. If a mutation is confirmed committed but its subsequent balance read fails, Vault returns success with `balance=NaN` and a warning message, not a failure that invites duplicate issuance; use Aurora's exact async API where this legacy response is unsuitable. Ambiguous physical commit failures remain a recovery concern. A compromised plugin has host-level trust and cannot be made safe merely by economy permissions.

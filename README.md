@@ -22,7 +22,7 @@ The central design rule: **a feature may move money, but it may not bypass accou
 | **Exact multi-currency wallets** | 0–6 decimal places; signed 64-bit minor units; checked arithmetic; per-currency precision pinned to the database. |
 | **Double-entry ledger** | Every movement balances independently in each currency. Wallets, treasury, individual savings contracts, individual escrows and market pools are separate accounts. |
 | **Durable atomic commits** | SQLite WAL, full synchronization, foreign keys, strict tables for new databases, immutable journal triggers and one serialized writer. Domain state changes commit with their money. |
-| **Replay-safe requests** | Actor-scoped keys, intent conflict detection and original durable receipts. `/pay` accepts a reusable request ID; the async API requires one. |
+| **Replay-safe requests** | Actor-scoped keys, intent conflict detection and original durable receipts. Payments, savings, escrows, orders, swaps, mint/burn and liquidity commands accept reusable request IDs; the async API requires one. |
 | **Solvency-first savings** | Fixed-term 1–365-day deposits. The full promised yield is reserved from treasury at creation. Maturity never depends on future issuance. |
 | **Refundable payment escrow** | Funds and transfer fees are held in isolated custody. Beneficiary acceptance, payer cancellation and offline expiry refunds are atomic. |
 | **Recurring payments** | Offline-capable, fee-snapshotted, finite installment orders; atomic execution counters; automatic pause on insufficient funds, spending limits or frozen wallets. No restart catch-up burst. |
@@ -102,6 +102,10 @@ Replace player names with players who have joined, or use their UUIDs. Use the f
 
 Player feature permissions default to true. Administrative and other-player balance permissions default to operators only. Console can administer the economy but cannot act as a player payer.
 
+Financial mutation commands in the table accept a final optional `[request-id]`, except wallet freeze/unfreeze. Omit it to generate a displayed ID, or supply a persisted ID and reuse it with exactly the same arguments after an uncertain result. For `/pay`, specify the currency before the request ID. List, quote, inspection, audit and backup commands do not accept transaction request IDs.
+
+**Upgrade note:** this review introduces schema version 3 and SQLite JDBC 3.54.1.0. Take a healthy backup before upgrading; older schema-v2 binaries cannot open an upgraded database. Monetary YAML values must be quoted strings, and numeric/boolean settings must have the correct YAML types.
+
 ## Important semantics
 
 - **Payer pays the transfer fee on top.** A 100.00 COIN payment at 25 bps debits 100.25 COIN. Small fees round upward; rewards and exchange outputs round downward.
@@ -114,6 +118,7 @@ Player feature permissions default to true. Administrative and other-player bala
 
 ## Documentation
 
+- [Static review findings and unverified changes](docs/REVIEW.md)
 - [Architecture and transaction invariants](docs/ARCHITECTURE.md)
 - [Economic formulas and contract state machines](docs/ECONOMICS.md)
 - [Operations, backup and incident recovery](docs/OPERATIONS.md)

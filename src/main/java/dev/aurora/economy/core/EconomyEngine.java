@@ -25,6 +25,11 @@ import static dev.aurora.economy.storage.LedgerStore.TREASURY;
 
 /** Framework-independent business logic. Every public financial mutation is replay-safe. */
 public final class EconomyEngine {
+    private static final String UUID_GRAMMAR = "[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}";
+    private static final java.util.regex.Pattern FULL_UUID = java.util.regex.Pattern.compile(UUID_GRAMMAR);
+    private static final java.util.regex.Pattern PLAYER_NAME = java.util.regex.Pattern.compile("[A-Za-z0-9_]{1,16}");
+    private static final java.util.regex.Pattern REQUEST_ID = java.util.regex.Pattern.compile("[A-Za-z0-9._:-]{1,96}");
+    private static final java.util.regex.Pattern PLAYER_WALLET = java.util.regex.Pattern.compile("player:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}:wallet");
     private final LedgerStore store;
     private final Clock clock;
     private final Policy policy;
@@ -33,7 +38,9 @@ public final class EconomyEngine {
 
     public EconomyEngine(LedgerStore store, Clock clock, Policy policy, List<Currency> configured) {
         if (configured.isEmpty()) throw new IllegalArgumentException("At least one currency is required");
-        this.store = store; this.clock = clock; this.policy = policy;
+        this.store = java.util.Objects.requireNonNull(store, "store");
+        this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        this.policy = java.util.Objects.requireNonNull(policy, "policy");
         Map<String, Currency> map = new LinkedHashMap<>();
         for (Currency currency : configured) {
             if (map.put(currency.code(), currency) != null) throw new IllegalArgumentException("Duplicate currency");
@@ -43,28 +50,34 @@ public final class EconomyEngine {
     public Collection<Currency> currencies() { return currencies.values(); }
     public Policy policy() { return policy; }
     public Currency currency(String code) {
+        if (code == null) throw new EconomyException(UNKNOWN_CURRENCY, "Currency is required.");
         Currency currency = currencies.get(code.toUpperCase(Locale.ROOT));
         if (currency == null) throw new EconomyException(UNKNOWN_CURRENCY, "Unknown currency: " + code);
         return currency;
     }
-    public static String wallet(UUID owner) { return "player:" + owner + ":wallet"; }
-    public static String escrowAccount(String id) { return "escrow:" + id; }
-    public static String depositAccount(String id) { return "vault:" + id; }
+    private static UUID requireUuid(UUID owner) {
+        if (owner == null) throw EconomyException.invalid("Player UUID is required.");
+        return owner;
+    }
+    public static String wallet(UUID owner) { return "player:" + requireUuid(owner) + ":wallet"; }
+    public static String escrowAccount(String id) { return "escrow:" + canonicalId(id); }
+    public static String depositAccount(String id) { return "vault:" + canonicalId(id); }
     public String poolAccount(String a, String b) {
         String first = currency(a).code(), second = currency(b).code();
         if (first.equals(second)) throw EconomyException.invalid("Select two different currencies.");
         return "system:pool:" + (first.compareTo(second) < 0 ? first + "_" + second : second + "_" + first).toLowerCase(Locale.ROOT);
     }
     private static String intent(Object... values) {
-        // Inputs here are validated UUIDs, enum-like codes and numeric values, never arbitrary user text.
+        // Variable free text is only ever the last field. All earlier fields have fixed safe grammars.
         return java.util.Arrays.stream(values).map(Object::toString).collect(java.util.stream.Collectors.joining("|"));
     }
     private static String key(String kind, UUID actor, String request) {
-        if (request == null || !request.matches("[A-Za-z0-9._:-]{1,96}")) throw EconomyException.invalid("Invalid request identifier.");
+        requireUuid(actor);
+        if (request == null || !REQUEST_ID.matcher(request).matches()) throw EconomyException.invalid("Invalid request identifier.");
         return kind + ":" + actor + ":" + request;
     }
     private static void different(UUID a, UUID b) {
-        if (a.equals(b)) throw EconomyException.invalid("You cannot pay yourself.");
+        if (requireUuid(a).equals(requireUuid(b))) throw EconomyException.invalid("You cannot pay yourself.");
     }
     private static PreparedStatement sql(Connection c, String query, Object... args) throws SQLException {
         PreparedStatement statement = c.prepareStatement(query);
@@ -80,29 +93,32 @@ public final class EconomyEngine {
     }
 
     public Receipt register(UUID player, String name) {
-        if (name == null || !name.matches("[A-Za-z0-9_]{1,16}")) name = player.toString();
-        String safeName = name;
-        store.read(c -> {
-            execute(c, "INSERT INTO players VALUES(?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,seen_at=excluded.seen_at", player.toString(), safeName, clock.millis());
+        requireUuid(player);
+        String safeName = name != null && PLAYER_NAME.matcher(name).matches() ? name : player.toString();
+        LedgerStore.SqlRead<Void> refresh = c -> {
+            execute(c, "INSERT INTO players(uuid,name,seen_at) VALUES(?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=CASE WHEN excluded.name=excluded.uuid THEN players.name ELSE excluded.name END,seen_at=MAX(players.seen_at,excluded.seen_at)", player.toString(), safeName, clock.millis());
             return null;
-        });
+        };
         return store.write("REGISTER:" + player, player.toString(), "REGISTER", player.toString(), tx -> {
+            refresh.read(tx.connection());
             for (Currency currency : currencies.values()) tx.move(MINT, wallet(player), currency.code(), currency.startingBalance());
             return player.toString();
-        });
+        }, refresh);
     }
     /** Only known names are resolved. Never invokes blocking Mojang lookup or invents offline UUIDs. */
     public UUID resolve(String name) {
-        try { return UUID.fromString(name); }
-        catch (IllegalArgumentException ignored) { }
+        if (name == null) throw EconomyException.invalid("Player name or UUID is required.");
+        if (FULL_UUID.matcher(name).matches()) return UUID.fromString(name);
+        if (!PLAYER_NAME.matcher(name).matches()) throw EconomyException.invalid("Use a player name or full UUID.");
         return store.read(c -> {
-            try (var s = sql(c, "SELECT uuid FROM players WHERE name=? COLLATE NOCASE ORDER BY seen_at DESC LIMIT 1", name); var rs = s.executeQuery()) {
+            try (var s = sql(c, "SELECT uuid FROM players WHERE name=? COLLATE NOCASE ORDER BY seen_at DESC,uuid LIMIT 1", name); var rs = s.executeQuery()) {
                 if (!rs.next()) throw new EconomyException(NOT_FOUND, "Player must have joined this server, or use their UUID.");
                 return UUID.fromString(rs.getString(1));
             }
         });
     }
     public boolean accountExists(UUID owner) {
+        requireUuid(owner);
         return store.read(c -> scalar(c, "SELECT COUNT(*) FROM players WHERE uuid=?", owner.toString()) > 0);
     }
     public long balance(UUID owner, String code) { return store.balance(wallet(owner), currency(code).code()); }
@@ -120,7 +136,7 @@ public final class EconomyEngine {
         });
     }
 
-    public WalletControl control(UUID owner) { return store.read(c -> control(c, owner)); }
+    public WalletControl control(UUID owner) { requireUuid(owner); return store.read(c -> control(c, owner)); }
     private static WalletControl control(Connection c, UUID owner) throws SQLException {
         try (var s = sql(c, "SELECT frozen,reason,updated_at FROM wallet_controls WHERE owner=?", owner.toString()); var rs = s.executeQuery()) {
             return rs.next() ? new WalletControl(owner, rs.getInt(1) == 1, rs.getString(2), Instant.ofEpochMilli(rs.getLong(3)))
@@ -128,6 +144,7 @@ public final class EconomyEngine {
         }
     }
     public Receipt setFrozen(UUID actor, UUID owner, boolean frozen, String reason, String request) {
+        requireUuid(owner);
         if (reason == null || reason.isBlank() || reason.length() > 160 || reason.chars().anyMatch(Character::isISOControl)) {
             throw EconomyException.invalid("Supply a printable freeze reason of 1 to 160 characters.");
         }
@@ -157,20 +174,27 @@ public final class EconomyEngine {
     private void spend(Tx tx, UUID owner, String code, long amount) throws SQLException {
         String day = Instant.ofEpochMilli(tx.now()).atZone(ZoneOffset.UTC).toLocalDate().toString();
         long prior = scalar(tx.connection(), "SELECT units FROM daily_spend WHERE owner=? AND currency=? AND day=?", owner.toString(), code, day);
-        long next = Money.add(prior, amount), limit = currency(code).dailyLimit();
-        if (limit > 0 && next > limit) throw new EconomyException(DAILY_LIMIT, "UTC daily spending limit reached for " + code + ".");
+        long limit = currency(code).dailyLimit();
+        if (limit > 0 && (prior >= limit || amount > limit - prior)) throw new EconomyException(DAILY_LIMIT, "UTC daily spending limit reached for " + code + ".");
+        // Unlimited circulation can exceed the counter's range without exceeding issued supply.
+        long next = amount > Long.MAX_VALUE - prior ? Long.MAX_VALUE : prior + amount;
         execute(tx.connection(), "INSERT INTO daily_spend VALUES(?,?,?,?) ON CONFLICT(owner,currency,day) DO UPDATE SET units=excluded.units", owner.toString(), code, day, next);
     }
     /** Used by authorized administration / Vault only; attribution is always journaled. */
     public Receipt issue(UUID actor, String targetAccount, String code, long amount, boolean burn, String request, String source) {
+        requireUuid(actor);
         Money.positive(amount); String currency = currency(code).code();
-        if (!targetAccount.equals(TREASURY)) {
-            if (!targetAccount.matches("player:[a-f0-9-]{36}:wallet")) throw new EconomyException(FORBIDDEN, "Invalid issuance target.");
-            try {
-                if (!UUID.fromString(targetAccount.substring(7, 43)).toString().equals(targetAccount.substring(7, 43))) throw new IllegalArgumentException();
-            } catch (IllegalArgumentException e) { throw new EconomyException(FORBIDDEN, "Invalid wallet UUID."); }
+        if (targetAccount == null) throw new EconomyException(FORBIDDEN, "Invalid issuance target.");
+        if (!targetAccount.equals(TREASURY) && !PLAYER_WALLET.matcher(targetAccount).matches()) {
+            throw new EconomyException(FORBIDDEN, "Invalid issuance target.");
         }
-        if (!source.matches("[A-Z_]{1,32}")) throw new IllegalArgumentException("Invalid issuance source");
+        if (source == null || !List.of("ADMIN_MINT", "ADMIN_BURN", "VAULT_DEPOSIT", "VAULT_WITHDRAW").contains(source)
+                || burn != (source.equals("ADMIN_BURN") || source.equals("VAULT_WITHDRAW"))) {
+            throw new EconomyException(FORBIDDEN, "Invalid issuance source or direction.");
+        }
+        if (source.startsWith("VAULT_") && !targetAccount.equals(wallet(actor))) {
+            throw new EconomyException(FORBIDDEN, "Vault operations must target the attributed player's wallet.");
+        }
         return store.write(key(source, actor, request), intent(targetAccount, currency, amount, burn), source, actor.toString(), tx -> {
             if (source.equals("VAULT_WITHDRAW")) { spendable(tx, actor); spend(tx, actor, currency, amount); }
             if (burn) tx.move(targetAccount, MINT, currency, amount); else tx.move(MINT, targetAccount, currency, amount);
@@ -188,7 +212,7 @@ public final class EconomyEngine {
             long fee = Money.fee(amount, policy.transferFeeBps()), total = Money.add(amount, fee);
             spend(tx, owner, currency, total);
             tx.move(wallet(owner), escrowAccount(tx.id()), currency, total);
-            execute(tx.connection(), "INSERT INTO escrows VALUES(?,?,?,?,?,?,?,'OPEN')", tx.id(), owner.toString(), beneficiary.toString(), currency, amount, fee, tx.now() + lifetimeSeconds * 1_000);
+            execute(tx.connection(), "INSERT INTO escrows VALUES(?,?,?,?,?,?,?,'OPEN')", tx.id(), owner.toString(), beneficiary.toString(), currency, amount, fee, Money.add(tx.now(), lifetimeSeconds * 1_000));
             return tx.id();
         });
     }
@@ -220,6 +244,7 @@ public final class EconomyEngine {
         execute(tx.connection(), "UPDATE escrows SET state=? WHERE id=?", state, escrow.id());
     }
     public List<Escrow> escrows(UUID player) {
+        requireUuid(player);
         return store.read(c -> {
             List<Escrow> result = new ArrayList<>();
             try (var s = sql(c, "SELECT * FROM escrows WHERE owner=? OR beneficiary=? ORDER BY (state='OPEN') DESC,expires_at DESC LIMIT 100", player.toString(), player.toString()); var rs = s.executeQuery()) {
@@ -252,7 +277,7 @@ public final class EconomyEngine {
             tx.move(wallet(owner), depositAccount(tx.id()), currency, principal);
             // Reserve the full promised yield now: maturity never depends on future minting.
             tx.move(TREASURY, depositAccount(tx.id()), currency, interest);
-            execute(tx.connection(), "INSERT INTO deposits VALUES(?,?,?,?,?,?,'LOCKED')", tx.id(), owner.toString(), currency, principal, interest, tx.now() + days * 86_400_000L);
+            execute(tx.connection(), "INSERT INTO deposits VALUES(?,?,?,?,?,?,'LOCKED')", tx.id(), owner.toString(), currency, principal, interest, Money.add(tx.now(), days * 86_400_000L));
             return tx.id();
         });
     }
@@ -269,6 +294,7 @@ public final class EconomyEngine {
         });
     }
     public List<Deposit> deposits(UUID owner) {
+        requireUuid(owner);
         return store.read(c -> {
             List<Deposit> result = new ArrayList<>();
             try (var s = sql(c, "SELECT * FROM deposits WHERE owner=? ORDER BY (state='LOCKED') DESC,unlock_at DESC LIMIT 100", owner.toString()); var rs = s.executeQuery()) {
@@ -297,7 +323,7 @@ public final class EconomyEngine {
                 throw new EconomyException(LIMIT_REACHED, "Too many active or paused recurring payments.");
             }
             execute(tx.connection(), "INSERT INTO orders(id,owner,beneficiary,currency,amount,fee_bps,interval_seconds,next_due,executions,total_executions,state) VALUES(?,?,?,?,?,?,?,?,0,?,'ACTIVE')",
-                    tx.id(), owner.toString(), beneficiary.toString(), currency, amount, policy.transferFeeBps(), intervalSeconds, tx.now() + intervalSeconds * 1_000, total);
+                    tx.id(), owner.toString(), beneficiary.toString(), currency, amount, policy.transferFeeBps(), intervalSeconds, Money.add(tx.now(), intervalSeconds * 1_000), total);
             return tx.id();
         });
     }
@@ -309,11 +335,13 @@ public final class EconomyEngine {
             if (resume) spendable(tx, owner);
             if (resume && !order.state().equals("PAUSED")) throw new EconomyException(INVALID_STATE, "Only paused orders can be resumed.");
             if (!resume && !List.of("ACTIVE", "PAUSED").contains(order.state())) throw new EconomyException(INVALID_STATE, "Order is already closed.");
-            execute(tx.connection(), "UPDATE orders SET state=?,reason='',next_due=? WHERE id=?", resume ? "ACTIVE" : "CANCELLED", tx.now() + order.intervalSeconds() * 1_000, target);
+            execute(tx.connection(), "UPDATE orders SET state=?,reason='',next_due=?,revision=? WHERE id=?", resume ? "ACTIVE" : "CANCELLED",
+                    Money.add(tx.now(), order.intervalSeconds() * 1_000), Money.add(order.revision(), 1), target);
             return target;
         });
     }
     public List<StandingOrder> orders(UUID owner) {
+        requireUuid(owner);
         return store.read(c -> {
             List<StandingOrder> result = new ArrayList<>();
             try (var s = sql(c, "SELECT * FROM orders WHERE owner=? ORDER BY (state IN ('ACTIVE','PAUSED')) DESC,next_due DESC LIMIT 100", owner.toString()); var rs = s.executeQuery()) {
@@ -330,7 +358,7 @@ public final class EconomyEngine {
     private static StandingOrder mapOrder(ResultSet rs) throws SQLException {
         return new StandingOrder(rs.getString("id"), UUID.fromString(rs.getString("owner")), UUID.fromString(rs.getString("beneficiary")), rs.getString("currency"),
                 rs.getLong("amount"), rs.getInt("fee_bps"), rs.getLong("interval_seconds"), Instant.ofEpochMilli(rs.getLong("next_due")),
-                rs.getInt("executions"), rs.getInt("total_executions"), rs.getString("state"), rs.getString("reason"));
+                rs.getInt("executions"), rs.getInt("total_executions"), rs.getString("state"), rs.getString("reason"), rs.getLong("revision"));
     }
     public Maintenance maintain() {
         long now = clock.millis();
@@ -366,29 +394,33 @@ public final class EconomyEngine {
             try {
                 Receipt receipt = store.write("ORDER_RUN:" + run, run, "ORDER_RUN", "scheduler", tx -> {
                     StandingOrder current = order(tx.connection(), scheduled.id());
-                    if (!current.state().equals("ACTIVE") || current.executions() != scheduled.executions() || current.nextDue().toEpochMilli() > tx.now()) {
+                    if (!current.state().equals("ACTIVE") || current.executions() != scheduled.executions() || current.revision() != scheduled.revision()
+                            || !current.nextDue().equals(scheduled.nextDue()) || current.nextDue().toEpochMilli() > tx.now()) {
                         throw new EconomyException(INVALID_STATE, "Order changed while scheduled.");
                     }
                     payment(tx, current.owner(), current.beneficiary(), current.currency(), current.amount(), current.feeBps());
                     int executed = current.executions() + 1;
                     // Deliberately no offline catch-up burst: one installment, then a full new interval.
                     execute(tx.connection(), "UPDATE orders SET executions=?,next_due=?,state=? WHERE id=?", executed,
-                            tx.now() + current.intervalSeconds() * 1_000, executed >= current.totalExecutions() ? "COMPLETED" : "ACTIVE", current.id());
+                            Money.add(tx.now(), current.intervalSeconds() * 1_000), executed >= current.totalExecutions() ? "COMPLETED" : "ACTIVE", current.id());
                     return current.id();
                 });
                 if (!receipt.replayed()) payments++;
             } catch (EconomyException e) {
                 if (e.code() == INVALID_STATE) continue;
                 if (e.code() != INSUFFICIENT_FUNDS && e.code() != DAILY_LIMIT && e.code() != INVALID_AMOUNT && e.code() != ACCOUNT_FROZEN) throw e;
-                // A new failure after a manual resume needs a fresh key, not the old paused receipt.
-                store.write("ORDER_PAUSE:" + run + ":" + scheduled.nextDue().toEpochMilli(), intent(run, e.code()), "ORDER_PAUSE", "scheduler", tx -> {
-                    StandingOrder current = order(tx.connection(), scheduled.id());
-                    if (current.state().equals("ACTIVE") && current.executions() == scheduled.executions()) {
+                try {
+                    Receipt paused = store.write("ORDER_PAUSE:" + run + ":" + scheduled.revision() + ":" + e.code(), intent(run, scheduled.revision(), e.code()), "ORDER_PAUSE", "scheduler", tx -> {
+                        StandingOrder current = order(tx.connection(), scheduled.id());
+                        if (!current.state().equals("ACTIVE") || current.executions() != scheduled.executions()
+                                || current.revision() != scheduled.revision() || !current.nextDue().equals(scheduled.nextDue())) {
+                            throw new EconomyException(INVALID_STATE, "Order changed before it could be paused.");
+                        }
                         execute(tx.connection(), "UPDATE orders SET state='PAUSED',reason=? WHERE id=?", e.code().name(), current.id());
-                    }
-                    return current.id();
-                });
-                pauses++;
+                        return current.id();
+                    });
+                    if (!paused.replayed()) pauses++;
+                } catch (EconomyException changed) { if (changed.code() != INVALID_STATE) throw changed; }
             }
         }
         return new Maintenance(refunds, payments, pauses);
@@ -425,18 +457,29 @@ public final class EconomyEngine {
     }
 
     public Portfolio portfolio(UUID owner) {
+        requireUuid(owner);
         return store.read(c -> {
             Map<String, Long> wallets = new LinkedHashMap<>(), savings = new LinkedHashMap<>(), held = new LinkedHashMap<>(), spent = new LinkedHashMap<>();
             String day = clock.instant().atZone(ZoneOffset.UTC).toLocalDate().toString();
             for (Currency currency : currencies.values()) {
-                String code = currency.code(); wallets.put(code, LedgerStore.storedBalance(c, wallet(owner), code));
-                savings.put(code, scalar(c, "SELECT COALESCE(SUM(principal+interest),0) FROM deposits WHERE owner=? AND currency=? AND state='LOCKED'", owner.toString(), code));
-                held.put(code, scalar(c, "SELECT COALESCE(SUM(amount+fee),0) FROM escrows WHERE owner=? AND currency=? AND state='OPEN'", owner.toString(), code));
-                spent.put(code, scalar(c, "SELECT units FROM daily_spend WHERE owner=? AND currency=? AND day=?", owner.toString(), code, day));
+                String code = currency.code(); wallets.put(code, 0L); savings.put(code, 0L); held.put(code, 0L); spent.put(code, 0L);
             }
+            collectAmounts(c, wallets, "SELECT currency,units FROM balances WHERE account=?", wallet(owner));
+            collectAmounts(c, savings, "SELECT currency,SUM(principal+interest) FROM deposits WHERE owner=? AND state='LOCKED' GROUP BY currency", owner.toString());
+            collectAmounts(c, held, "SELECT currency,SUM(amount+fee) FROM escrows WHERE owner=? AND state='OPEN' GROUP BY currency", owner.toString());
+            collectAmounts(c, spent, "SELECT currency,units FROM daily_spend WHERE owner=? AND day=?", owner.toString(), day);
             WalletControl control = control(c, owner);
             return new Portfolio(wallets, savings, held, spent, control.frozen(), control.reason());
         });
+    }
+    private static void collectAmounts(Connection c, Map<String, Long> amounts, String query, Object... args) throws SQLException {
+        try (var s = sql(c, query, args); var rs = s.executeQuery()) {
+            while (rs.next()) {
+                String code = rs.getString(1);
+                if (!amounts.containsKey(code)) throw new EconomyException(INTEGRITY, "Unconfigured currency in portfolio.");
+                amounts.put(code, rs.getLong(2));
+            }
+        }
     }
     public List<Supply> supply() {
         return store.read(c -> {
@@ -471,15 +514,33 @@ public final class EconomyEngine {
     private Audit auditConsistent() {
         return store.read(c -> {
             Audit ledger = store.audit(); List<String> errors = new ArrayList<>(ledger.violations());
+            auditDomain(c, errors);
             Map<String, Long> expected = new LinkedHashMap<>();
-            try (var s = c.createStatement(); var rs = s.executeQuery("SELECT * FROM escrows")) {
+            try (var s = c.createStatement(); var rs = s.executeQuery("SELECT e.*,j.intent AS opening_intent,j.actor AS opening_actor,j.kind AS opening_kind,j.reference AS opening_reference,j.created_at AS opening_time,COALESCE(p.delta,0) AS opening_units FROM escrows e LEFT JOIN journal j ON j.id=e.id LEFT JOIN entries p ON p.tx_id=e.id AND p.account='escrow:'||e.id AND p.currency=e.currency")) {
                 while (rs.next()) {
-                    Escrow e = mapEscrow(rs); expected.put(escrowAccount(e.id()) + "|" + e.currency(), e.state().equals("OPEN") ? Money.add(e.amount(), e.fee()) : 0);
+                    Escrow e = mapEscrow(rs);
+                    String[] terms = rs.getString("opening_intent").split("\\|", -1);
+                    long lifetime = terms.length == 5 ? Long.parseLong(terms[4]) : 0;
+                    if (!"ESCROW_CREATE".equals(rs.getString("opening_kind")) || !e.owner().toString().equals(rs.getString("opening_actor"))
+                            || !e.id().equals(rs.getString("opening_reference")) || e.owner().equals(e.beneficiary()) || e.amount() <= 0 || e.fee() < 0
+                            || lifetime < 60 || lifetime > 30L * 86_400
+                            || !intent(e.owner(), e.beneficiary(), currency(e.currency()).code(), e.amount(), lifetime).equals(rs.getString("opening_intent"))
+                            || e.expires().toEpochMilli() != Money.add(rs.getLong("opening_time"), lifetime * 1_000)
+                            || rs.getLong("opening_units") != Money.add(e.amount(), e.fee())) errors.add("Escrow terms mismatch: " + e.id());
+                    expected.put(escrowAccount(e.id()) + "|" + e.currency(), e.state().equals("OPEN") ? Money.add(e.amount(), e.fee()) : 0);
                 }
             }
-            try (var s = c.createStatement(); var rs = s.executeQuery("SELECT * FROM deposits")) {
+            try (var s = c.createStatement(); var rs = s.executeQuery("SELECT d.*,j.intent AS opening_intent,j.actor AS opening_actor,j.kind AS opening_kind,j.reference AS opening_reference,j.created_at AS opening_time,COALESCE(p.delta,0) AS opening_units FROM deposits d LEFT JOIN journal j ON j.id=d.id LEFT JOIN entries p ON p.tx_id=d.id AND p.account='vault:'||d.id AND p.currency=d.currency")) {
                 while (rs.next()) {
-                    Deposit d = mapDeposit(rs); expected.put(depositAccount(d.id()) + "|" + d.currency(), d.state().equals("LOCKED") ? Money.add(d.principal(), d.interest()) : 0);
+                    Deposit d = mapDeposit(rs);
+                    String[] terms = rs.getString("opening_intent").split("\\|", -1);
+                    int days = terms.length == 4 ? Integer.parseInt(terms[3]) : 0;
+                    if (!"BANK_OPEN".equals(rs.getString("opening_kind")) || !d.owner().toString().equals(rs.getString("opening_actor"))
+                            || !d.id().equals(rs.getString("opening_reference")) || d.principal() <= 0 || d.interest() < 0 || days < 1 || days > 365
+                            || !intent(d.owner(), currency(d.currency()).code(), d.principal(), days).equals(rs.getString("opening_intent"))
+                            || d.unlocks().toEpochMilli() != Money.add(rs.getLong("opening_time"), days * 86_400_000L)
+                            || rs.getLong("opening_units") != Money.add(d.principal(), d.interest())) errors.add("Savings terms mismatch: " + d.id());
+                    expected.put(depositAccount(d.id()) + "|" + d.currency(), d.state().equals("LOCKED") ? Money.add(d.principal(), d.interest()) : 0);
                 }
             }
             try (var s = c.createStatement(); var rs = s.executeQuery("SELECT account,currency,units FROM balances WHERE account LIKE 'escrow:%' OR account LIKE 'vault:%'")) {
@@ -499,9 +560,103 @@ public final class EconomyEngine {
             return new Audit(ledger.transactions(), ledger.postings(), ledger.headHash(), errors);
         });
     }
+    private void auditDomain(Connection c, List<String> errors) throws SQLException {
+        Map<String, Integer> storedCurrencies = new LinkedHashMap<>();
+        try (var s = c.createStatement(); var rs = s.executeQuery("SELECT code,decimals FROM currency_specs")) {
+            while (rs.next()) storedCurrencies.put(rs.getString(1), rs.getInt(2));
+        }
+        Map<String, Integer> configured = new LinkedHashMap<>();
+        currencies.values().forEach(currency -> configured.put(currency.code(), currency.decimals()));
+        if (!configured.equals(storedCurrencies)) errors.add("Persisted currency specifications mismatch");
+
+        try (var s = c.createStatement(); var rs = s.executeQuery("SELECT account,currency FROM balances")) {
+            while (rs.next()) if (!supportedAccount(rs.getString(1), rs.getString(2))) errors.add("Unknown account topology: " + rs.getString(1));
+        }
+
+        // Mutable incident controls must agree with the most recent immutable administrative event.
+        Map<UUID, WalletControl> controls = new LinkedHashMap<>();
+        try (var s = c.createStatement(); var rs = s.executeQuery("SELECT * FROM journal WHERE kind IN ('WALLET_FREEZE','WALLET_UNFREEZE') ORDER BY seq")) {
+            while (rs.next()) {
+                String[] terms = rs.getString("intent").split("\\|", 3);
+                UUID owner = UUID.fromString(canonicalId(terms[0]));
+                boolean frozen = "WALLET_FREEZE".equals(rs.getString("kind"));
+                if (terms.length != 3 || !Boolean.toString(frozen).equals(terms[1]) || !owner.toString().equals(rs.getString("reference"))) {
+                    errors.add("Invalid wallet control event: " + rs.getString("id")); continue;
+                }
+                controls.put(owner, new WalletControl(owner, frozen, terms[2], Instant.ofEpochMilli(rs.getLong("created_at"))));
+            }
+        }
+        try (var s = c.createStatement(); var rs = s.executeQuery("SELECT * FROM wallet_controls")) {
+            while (rs.next()) {
+                UUID owner = UUID.fromString(canonicalId(rs.getString("owner")));
+                WalletControl expected = controls.remove(owner);
+                WalletControl actual = new WalletControl(owner, rs.getInt("frozen") == 1, rs.getString("reason"), Instant.ofEpochMilli(rs.getLong("updated_at")));
+                if (!actual.equals(expected)) errors.add("Wallet control projection mismatch: " + owner);
+            }
+        }
+        if (!controls.isEmpty()) errors.add("Missing wallet controls");
+
+        try (var s = c.createStatement(); var rs = s.executeQuery("SELECT o.*,j.intent AS opening_intent,j.kind AS opening_kind,j.actor AS opening_actor,j.reference AS opening_reference,(SELECT COUNT(*) FROM journal r WHERE r.kind='ORDER_RUN' AND r.reference=o.id) AS run_count FROM orders o LEFT JOIN journal j ON j.id=o.id")) {
+            while (rs.next()) {
+                StandingOrder order = mapOrder(rs);
+                if (!"ORDER_CREATE".equals(rs.getString("opening_kind")) || !order.owner().toString().equals(rs.getString("opening_actor"))
+                        || !order.id().equals(rs.getString("opening_reference")) || order.owner().equals(order.beneficiary())
+                        || order.amount() <= 0 || order.feeBps() < 0 || order.feeBps() > 1_000 || order.intervalSeconds() < 60 || order.intervalSeconds() > 30L * 86_400
+                        || order.totalExecutions() < 1 || order.totalExecutions() > 10_000 || order.executions() < 0 || order.executions() > order.totalExecutions()
+                        || order.revision() < 0 || order.executions() != rs.getLong("run_count")
+                        || order.state().equals("COMPLETED") != (order.executions() == order.totalExecutions())
+                        || !intent(order.owner(), order.beneficiary(), currency(order.currency()).code(), order.amount(), order.intervalSeconds(), order.totalExecutions()).equals(rs.getString("opening_intent"))) {
+                    errors.add("Recurring order terms/counter mismatch: " + order.id());
+                }
+            }
+        }
+        for (String[] contract : new String[][]{{"escrows", "ESCROW_CREATE"}, {"deposits", "BANK_OPEN"}, {"orders", "ORDER_CREATE"}}) {
+            if (scalar(c, "SELECT COUNT(*) FROM journal j LEFT JOIN " + contract[0] + " d ON d.id=j.id WHERE j.kind=? AND d.id IS NULL", contract[1]) != 0) {
+                errors.add("Missing contracts: " + contract[0]);
+            }
+        }
+        for (String[] fields : new String[][]{
+                {"currency_specs", "decimals", "decimals NOT BETWEEN 0 AND 6"},
+                {"players", "seen_at", "length(uuid)<>36"},
+                {"daily_spend", "units", "units<0 OR currency NOT IN (SELECT code FROM currency_specs)"},
+                {"escrows", "amount,fee,expires_at", "state NOT IN ('OPEN','ACCEPTED','CANCELLED','EXPIRED')"},
+                {"deposits", "principal,interest,unlock_at", "state NOT IN ('LOCKED','CLAIMED')"},
+                {"orders", "amount,fee_bps,interval_seconds,next_due,executions,total_executions,revision", "state NOT IN ('ACTIVE','PAUSED','CANCELLED','COMPLETED') OR amount<=0 OR fee_bps NOT BETWEEN 0 AND 1000 OR interval_seconds NOT BETWEEN 60 AND 2592000 OR total_executions NOT BETWEEN 1 AND 10000 OR executions<0 OR executions>total_executions OR revision<0"},
+                {"wallet_controls", "frozen,updated_at", "frozen NOT IN (0,1)"}}) {
+            String types = java.util.Arrays.stream(fields[1].split(",")).map(field -> "typeof(" + field + ")<>'integer'").collect(java.util.stream.Collectors.joining(" OR "));
+            if (scalar(c, "SELECT COUNT(*) FROM " + fields[0] + " WHERE " + types + " OR " + fields[2]) != 0) errors.add("Invalid domain storage: " + fields[0]);
+        }
+    }
+
+    private boolean supportedAccount(String account, String code) {
+        if (account == null || !currencies.containsKey(code)) return false;
+        if (account.equals(MINT) || account.equals(TREASURY) || PLAYER_WALLET.matcher(account).matches()) return true;
+        if (account.startsWith("escrow:") || account.startsWith("vault:")) {
+            String id = account.substring(account.indexOf(':') + 1);
+            return FULL_UUID.matcher(id).matches() && id.equals(id.toLowerCase(Locale.ROOT));
+        }
+        if (account.startsWith("system:pool:")) {
+            String[] pair = account.substring(12).toUpperCase(Locale.ROOT).split("_", -1);
+            return pair.length == 2 && currencies.containsKey(pair[0]) && currencies.containsKey(pair[1])
+                    && pair[0].compareTo(pair[1]) < 0 && (code.equals(pair[0]) || code.equals(pair[1]))
+                    && account.equals(poolAccount(pair[0], pair[1]));
+        }
+        return false;
+    }
+
     public Backup backup(java.nio.file.Path target) {
+        java.util.Objects.requireNonNull(target, "target");
         return store.read(c -> {
-            Audit report = audit();
+            java.nio.file.Path manifestTarget = java.nio.file.Path.of(target.toAbsolutePath().normalize() + ".manifest.txt");
+            if (java.nio.file.Files.exists(manifestTarget, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                throw new EconomyException(STORAGE, "Backup manifest destination already exists.");
+            }
+            Audit report;
+            try { report = audit(); }
+            catch (EconomyException e) {
+                if (e.code() != INTEGRITY) throw e;
+                report = new Audit(-1, -1, "unavailable", List.of("Deep audit could not complete; snapshot is incident evidence only."));
+            }
             java.nio.file.Path database = store.backup(target), manifest = java.nio.file.Path.of(database + ".manifest.txt");
             try {
                 var digest = java.security.MessageDigest.getInstance("SHA-256");
@@ -519,7 +674,9 @@ public final class EconomyEngine {
         });
     }
     private static String canonicalId(String id) {
-        try { return UUID.fromString(id).toString(); }
-        catch (IllegalArgumentException e) { throw EconomyException.invalid("Use the full UUID shown when the contract was created."); }
+        if (id == null || !FULL_UUID.matcher(id).matches()) {
+            throw EconomyException.invalid("Use the full UUID shown when the contract was created.");
+        }
+        return UUID.fromString(id).toString();
     }
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — static hardening review
+
+No build, compilation, tests or server execution were performed for this review.
+
+- Make player registration metadata/grants atomic, freeze-aware and safe across unknown offline names.
+- Restrict transaction handles to their live writer thread; reject nested writes; preserve rollback failures and confirmed commit receipts during cleanup faults.
+- Add schema v3 order revisions, stale-scheduler guards and history/reference/ranking/ownership indexes.
+- Validate exact YAML types, ASCII currency codes, printable symbols, full UUIDs, issuance source/direction and bounded zero amounts.
+- Make unlimited daily counters saturating and capped comparisons overflow-safe; normalize interest-result overflow errors.
+- Extend audits to historical ranges, orphan entries, missing triggers, custody creation terms, wallet-control events, order counters and domain storage/account topology.
+- Group portfolio queries, reuse ledger SQL statements, batch projections and stream canonical hash encoding without changing version-1 digests.
+- Defer GUI actions to the next tick; close protected views on disable; retry rejected registration; coalesce maintenance and drain accepted work despite interruption.
+- Add reusable request IDs to savings/escrow/order/swap/admin financial commands and permission-aware deep tab completion.
+- Preserve committed Vault success if a balance lookup fails; keep evidence snapshots available when a deep audit cannot complete.
+- Upgrade SQLite JDBC to verified published 3.54.1.0; preserve multi-release packaging metadata; validate release version syntax and serialize releases.
+- Improve missing/malformed CI-report summaries, backup-file ignore rules and upgrade/recovery documentation.
+
 ## 1.0.0
 
 Initial implementation, built and tested through GitHub Actions.

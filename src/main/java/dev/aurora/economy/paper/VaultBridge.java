@@ -37,12 +37,19 @@ final class VaultBridge implements Economy {
     }
     private double balance(UUID owner) { return currency.decimal(engine.balance(owner, currency.code())).doubleValue(); }
     private EconomyResponse mutate(UUID owner, double amount, boolean withdraw) {
+        boolean committed = false;
         try {
+            if (!isEnabled()) throw new EconomyException(EconomyException.Code.STORAGE, "Economy is unavailable.");
             long units = units(amount);
-            if (units > 0) engine.issue(owner, EconomyEngine.wallet(owner), currency.code(), units, withdraw, UUID.randomUUID().toString(), withdraw ? "VAULT_WITHDRAW" : "VAULT_DEPOSIT");
+            if (units > 0) {
+                engine.issue(owner, EconomyEngine.wallet(owner), currency.code(), units, withdraw, UUID.randomUUID().toString(), withdraw ? "VAULT_WITHDRAW" : "VAULT_DEPOSIT");
+                committed = true;
+            }
             return new EconomyResponse(amount, balance(owner), ResponseType.SUCCESS, "");
         } catch (EconomyException e) {
             if (e.code() == EconomyException.Code.STORAGE || e.code() == EconomyException.Code.INTEGRITY) plugin.getLogger().log(Level.SEVERE, "Vault operation failed", e);
+            // A balance-read failure after commit must not invite another issuance/burn attempt.
+            if (committed) return new EconomyResponse(amount, Double.NaN, ResponseType.SUCCESS, "Committed; current balance unavailable. Do not retry.");
             double current = 0;
             try { current = balance(owner); } catch (EconomyException ignored) { /* storage failed closed */ }
             return new EconomyResponse(0, current, ResponseType.FAILURE, e.code() + ": " + e.getMessage());
@@ -69,7 +76,9 @@ final class VaultBridge implements Economy {
     @Override public boolean hasAccount(String name) {
         try { return engine.accountExists(engine.resolve(name)); } catch (EconomyException e) { return false; }
     }
-    @Override public boolean hasAccount(OfflinePlayer player) { return engine.accountExists(player.getUniqueId()); }
+    @Override public boolean hasAccount(OfflinePlayer player) {
+        try { return engine.accountExists(player.getUniqueId()); } catch (EconomyException e) { return false; }
+    }
     @Override public boolean hasAccount(String name, String world) { return hasAccount(name); }
     @Override public boolean hasAccount(OfflinePlayer player, String world) { return hasAccount(player); }
     @Override public double getBalance(OfflinePlayer player) { return balance(player.getUniqueId()); }
@@ -94,10 +103,10 @@ final class VaultBridge implements Economy {
     @Override public EconomyResponse depositPlayer(OfflinePlayer p, String w, double a) { return depositPlayer(p, a); }
     @Override public EconomyResponse depositPlayer(String p, String w, double a) { return depositPlayer(p, a); }
     @Override public boolean createPlayerAccount(OfflinePlayer player) {
-        try { engine.register(player.getUniqueId(), player.getName()); return true; } catch (EconomyException e) { return false; }
+        try { if (!isEnabled()) return false; engine.register(player.getUniqueId(), player.getName()); return true; } catch (EconomyException e) { return false; }
     }
     @Override public boolean createPlayerAccount(String name) {
-        try { engine.register(engine.resolve(name), name); return true; } catch (EconomyException e) { return false; }
+        try { if (!isEnabled()) return false; engine.register(engine.resolve(name), name); return true; } catch (EconomyException e) { return false; }
     }
     @Override public boolean createPlayerAccount(OfflinePlayer p, String w) { return createPlayerAccount(p); }
     @Override public boolean createPlayerAccount(String p, String w) { return createPlayerAccount(p); }

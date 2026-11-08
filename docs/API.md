@@ -65,7 +65,7 @@ Every financial API call returns a `CompletableFuture`. It can complete on Auror
 
 Do not call `.join()`/`.get()` on the server thread. Do not perform blocking network operations inside your completion callback; schedule your own work. Handle plugin shutdown and unavailable services as normal lifecycle states.
 
-`EconomyException` exposes stable codes including invalid amount, insufficient funds, daily limit, account frozen, forbidden ownership, contract state, slippage, storage and integrity. Exceptional completion usually wraps it in a `CompletionException`.
+`EconomyException` exposes stable codes including invalid amount, insufficient funds, daily limit, account frozen, forbidden ownership, contract state, slippage, storage and integrity. Exceptional completion usually wraps it in a `CompletionException`. Null UUIDs/currencies and malformed or abbreviated contract UUIDs are rejected explicitly. A full UUID supplied to name resolution is an identity, not proof of registration; pre-registration receiving remains supported.
 
 ## Contracts and exchange
 
@@ -105,7 +105,8 @@ Vault exposes only the configured default currency. Its `OfflinePlayer` overload
 - Negative, nonfinite and inexact fractional inputs are rejected; zero is a no-op success.
 - Input minor units above `2^53-1` are rejected for double-interface safety.
 - Vault balance responses still use doubles and can lose display precision for enormous balances. Use the long API for exact values.
-- Failures do not report an uncommitted success, and ordinary financial failures return the current balance when readable.
+- Failures do not report an uncommitted success, and ordinary financial failures return the current balance when readable. If a mutation has already been confirmed committed and only the subsequent balance lookup fails, its response remains `SUCCESS` with `balance=Double.NaN` and an explanatory message. Do not repeat that deposit/withdrawal; the money already moved.
+- Issuance sources/directions are checked in the engine; Vault cannot target a wallet different from its attributed player or use a deposit source to bypass withdrawal controls.
 - Generic Vault banks return `NOT_IMPLEMENTED`.
 
 Vault calls are synchronous and can block while waiting for the ledger lock. No timeout is used to falsely report failure while a later commit might succeed. Vault has no request IDs; another plugin repeating a deposit call is a new issuance, not an Aurora replay.

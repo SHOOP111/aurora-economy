@@ -3,6 +3,9 @@ package dev.aurora.economy.core;
 import java.math.BigInteger;
 
 public final class Money {
+    private static final BigInteger BASIS_POINTS = BigInteger.valueOf(10_000);
+    private static final BigInteger FEE_ROUNDING = BigInteger.valueOf(9_999);
+    private static final BigInteger YEAR_DENOMINATOR = BigInteger.valueOf(10_000L * 365 * 86_400);
     private Money() { }
     public static long positive(long units) {
         if (units <= 0) throw EconomyException.invalid("Amount must be greater than zero.");
@@ -15,14 +18,18 @@ public final class Money {
     public static long fee(long units, int basisPoints) {
         positive(units);
         if (basisPoints < 0 || basisPoints > 10_000) throw new IllegalArgumentException("Invalid fee");
+        if (basisPoints == 0) return 0;
         return BigInteger.valueOf(units).multiply(BigInteger.valueOf(basisPoints))
-                .add(BigInteger.valueOf(9_999)).divide(BigInteger.valueOf(10_000)).longValueExact();
+                .add(FEE_ROUNDING).divide(BASIS_POINTS).longValueExact();
     }
     public static long interest(long principal, int aprBasisPoints, long seconds) {
         positive(principal);
         if (aprBasisPoints < 0 || seconds < 0) throw new IllegalArgumentException("Invalid interest terms");
-        return BigInteger.valueOf(principal).multiply(BigInteger.valueOf(aprBasisPoints))
-                .multiply(BigInteger.valueOf(seconds)).divide(BigInteger.valueOf(10_000L * 365 * 86_400)).longValueExact();
+        if (aprBasisPoints == 0 || seconds == 0) return 0;
+        try {
+            return BigInteger.valueOf(principal).multiply(BigInteger.valueOf(aprBasisPoints))
+                    .multiply(BigInteger.valueOf(seconds)).divide(YEAR_DENOMINATOR).longValueExact();
+        } catch (ArithmeticException e) { throw EconomyException.invalid("Interest exceeds the supported range."); }
     }
     public static long swapOutput(long reserveIn, long reserveOut, long input, int feeBps) {
         positive(input);
@@ -31,6 +38,6 @@ public final class Money {
         // Do not round the effective input before evaluating x*y=k.
         BigInteger effective = BigInteger.valueOf(input).multiply(BigInteger.valueOf(10_000L - feeBps));
         return BigInteger.valueOf(reserveOut).multiply(effective)
-                .divide(BigInteger.valueOf(reserveIn).multiply(BigInteger.valueOf(10_000)).add(effective)).longValueExact();
+                .divide(BigInteger.valueOf(reserveIn).multiply(BASIS_POINTS).add(effective)).longValueExact();
     }
 }

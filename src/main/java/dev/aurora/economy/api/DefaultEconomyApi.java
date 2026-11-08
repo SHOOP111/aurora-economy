@@ -4,6 +4,7 @@ import dev.aurora.economy.core.Currency;
 import dev.aurora.economy.core.EconomyEngine;
 import dev.aurora.economy.core.Models.*;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -13,7 +14,9 @@ import java.util.function.Supplier;
 public final class DefaultEconomyApi implements EconomyApi {
     private final EconomyEngine engine;
     private final Executor executor;
-    public DefaultEconomyApi(EconomyEngine engine, Executor executor) { this.engine = engine; this.executor = executor; }
+    public DefaultEconomyApi(EconomyEngine engine, Executor executor) {
+        this.engine = Objects.requireNonNull(engine, "engine"); this.executor = Objects.requireNonNull(executor, "executor");
+    }
     private <T> CompletableFuture<T> submit(Supplier<T> operation) {
         try { return CompletableFuture.supplyAsync(operation, executor); }
         catch (RejectedExecutionException e) { return CompletableFuture.failedFuture(e); }

@@ -10,16 +10,18 @@ final class Schema {
         try (Statement s = c.createStatement()) {
             s.execute("PRAGMA foreign_keys=ON");
             s.execute("PRAGMA busy_timeout=5000");
-            s.execute("PRAGMA journal_mode=WAL");
+            try (var rs = s.executeQuery("PRAGMA journal_mode=WAL")) {
+                if (!rs.next() || !"wal".equalsIgnoreCase(rs.getString(1))) throw new SQLException("SQLite WAL mode is required");
+            }
             s.execute("PRAGMA synchronous=FULL");
             int version;
             try (var rs = s.executeQuery("PRAGMA user_version")) { rs.next(); version = rs.getInt(1); }
-            if (version > 2) throw new SQLException("Database is newer than this plugin; downgrade refused");
-            if (version == 2) return;
-            if (version == 1) { addWalletControls(c); return; }
+            if (version > 3 || version < 0) throw new SQLException("Unsupported database version; downgrade refused");
+            if (version == 3) return;
+            if (version == 2) { addSchedulingRevision(c); return; }
+            if (version == 1) { addWalletControls(c); addSchedulingRevision(c); return; }
         }
-        c.setAutoCommit(false);
-        try (Statement s = c.createStatement()) {
+        transaction(c, s -> {
             s.execute("CREATE TABLE currency_specs(code TEXT PRIMARY KEY, decimals INTEGER NOT NULL) STRICT");
             s.execute("CREATE TABLE players(uuid TEXT PRIMARY KEY, name TEXT NOT NULL, seen_at INTEGER NOT NULL) STRICT");
             s.execute("CREATE INDEX players_name ON players(name COLLATE NOCASE, seen_at DESC)");
@@ -75,20 +77,55 @@ final class Schema {
                         + " BEGIN SELECT RAISE(ABORT,'immutable ledger'); END");
             }
             s.execute("PRAGMA user_version=1");
-            c.commit();
-        } catch (SQLException e) { c.rollback(); throw e; }
-        finally { c.setAutoCommit(true); }
+        });
         addWalletControls(c);
+        addSchedulingRevision(c);
+    }
+    private static void addSchedulingRevision(Connection c) throws SQLException {
+        transaction(c, s -> {
+            // IF NOT EXISTS also tolerates recovery/staging databases with already-created query indexes.
+            boolean found = false;
+            try (var rs = s.executeQuery("PRAGMA table_info(orders)")) {
+                while (rs.next()) if ("revision".equals(rs.getString("name"))) found = true;
+            }
+            if (!found) s.execute("ALTER TABLE orders ADD COLUMN revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0)");
+            s.execute("CREATE INDEX IF NOT EXISTS entries_history ON entries(account,tx_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS journal_reference ON journal(reference,kind)");
+            s.execute("CREATE INDEX IF NOT EXISTS balances_ranking ON balances(currency,units DESC,account)");
+            s.execute("CREATE INDEX IF NOT EXISTS escrows_owner ON escrows(owner,state,currency)");
+            s.execute("CREATE INDEX IF NOT EXISTS escrows_beneficiary ON escrows(beneficiary)");
+            s.execute("CREATE INDEX IF NOT EXISTS deposits_owner ON deposits(owner,state,currency)");
+            s.execute("CREATE INDEX IF NOT EXISTS orders_owner ON orders(owner,state)");
+            s.execute("PRAGMA user_version=3");
+        });
     }
     private static void addWalletControls(Connection c) throws SQLException {
-        c.setAutoCommit(false);
-        try (Statement s = c.createStatement()) {
+        transaction(c, s -> {
             s.execute("""
                 CREATE TABLE wallet_controls(owner TEXT PRIMARY KEY, frozen INTEGER NOT NULL CHECK(frozen IN (0,1)),
                     reason TEXT NOT NULL, updated_at INTEGER NOT NULL) STRICT
                 """);
-            s.execute("PRAGMA user_version=2"); c.commit();
-        } catch (SQLException e) { c.rollback(); throw e; }
-        finally { c.setAutoCommit(true); }
+            s.execute("PRAGMA user_version=2");
+        });
+    }
+    @FunctionalInterface interface Migration { void apply(Statement statement) throws SQLException; }
+    static void transaction(Connection c, Migration migration) throws SQLException {
+        c.setAutoCommit(false);
+        Throwable failure = null;
+        boolean safeToReset = false;
+        try (Statement s = c.createStatement()) {
+            migration.apply(s); c.commit(); safeToReset = true;
+        } catch (SQLException | RuntimeException | Error e) {
+            failure = e;
+            try { c.rollback(); safeToReset = true; }
+            catch (SQLException cleanup) { e.addSuppressed(cleanup); }
+            throw e;
+        } finally {
+            // A failed rollback must never be followed by an implicit autocommit of partial DDL.
+            if (safeToReset) {
+                try { c.setAutoCommit(true); }
+                catch (SQLException cleanup) { if (failure != null) failure.addSuppressed(cleanup); else throw cleanup; }
+            }
+        }
     }
 }

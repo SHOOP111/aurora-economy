@@ -75,6 +75,10 @@ Do not sum different currencies into a single "total value" without a defined va
 9. Insert the complete journal record and immutable entries.
 10. Commit once; return the durable receipt. Any exception before commit rolls back **all** changes.
 
+First registration updates player metadata and grants in this same transaction. A matching registration replay only refreshes metadata, under the same availability/freeze checks; a failed grant cannot leave a newly registered player behind. Unknown offline names do not overwrite an existing real name.
+
+Transaction handles are restricted to their active writer thread and cannot be reused after completion. Nested writes are rejected rather than accidentally committing an outer operation. Rollback failures preserve the original exception and disable the connection; cleanup never implicitly commits partial work. If a commit is known to have succeeded but connection cleanup fails, its successful receipt is preserved and the connection is disabled.
+
 Contract creation foreign keys are deferred until commit so the new contract can refer to the journal transaction that creates it. No placeholder immutable journal row needs to be edited later.
 
 ### Idempotency is not a distributed exactly-once promise
@@ -95,7 +99,7 @@ SHA-256 covers:
 
 Strings are UTF-8 with explicit byte lengths. Numbers use fixed-width binary encoding. Sorting and length prefixes prevent order-dependent output and ambiguous concatenation.
 
-SQL triggers refuse journal/entry updates and deletes. An audit verifies the chain and balance projections, plus foreign keys, SQLite integrity, custody projections and currency supply. This is an integrity mechanism, **not blockchain consensus or a cryptographic host-access barrier**. Mutable nonfinancial metadata is not wholly reconstructed from the hash chain.
+SQL triggers refuse journal/entry updates and deletes. An audit verifies the chain and historical balance ranges as well as final projections, plus foreign keys, immutable-trigger presence, SQLite integrity, custody projections and currency supply. It also compares custody terms with their creation intents/postings, reconstructs wallet controls from their administrative events, checks order installment counts and validates domain storage types/account topology. This is an integrity mechanism, **not blockchain consensus or a cryptographic host-access barrier**. Not every mutable scheduling/nonfinancial field is reconstructed from the hash chain.
 
 ## Concurrency and scheduling
 
@@ -105,11 +109,11 @@ Each maintenance pass examines at most 100 expired escrows and 100 due orders. E
 
 Orders pay one overdue installment, then schedule the next interval from actual execution time. This is intentionally not cron catch-up: weeks of server downtime do not immediately empty a player's wallet on restart.
 
-The worker drains accepted operations on normal shutdown before closing the connection. GUI callbacks and messages return to Paper's main thread; old inventory sessions are not overwritten by late results.
+The worker drains accepted operations on normal shutdown before closing the connection, even if the shutdown thread is interrupted. Pending maintenance passes are coalesced rather than accumulating behind a slow audit. Registration rejected by a saturated queue is retried while the player remains online. GUI callbacks and messages return to Paper's main thread; inventory actions run on the next tick, old inventory sessions are not overwritten by late results, and dashboard views are closed before disable removes their protections.
 
 ## Persistence and evolution
 
-`PRAGMA user_version` drives sequential migrations. Version 1 is the financial/custody ledger; version 2 adds wallet incident controls. Newer unknown versions refuse to open. A migration failure rolls back its migration.
+`PRAGMA user_version` drives sequential migrations. Version 1 is the financial/custody ledger; version 2 adds wallet incident controls; version 3 adds order control revisions and indexes for wallet history, ranking, contract ownership and journal-reference lookups. Each resume/cancel advances the revision so stale scheduled work cannot execute or pause a changed order. Newer unknown versions refuse to open. A migration failure rolls back its migration; a failed rollback never transitions into autocommit.
 
 Currency precision is persisted and checked on every open. New codes may be added; existing codes cannot be removed or have their scale changed. Starter grants are one global registration operation per player—not repeated whenever configuration changes.
 

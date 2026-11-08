@@ -30,6 +30,10 @@ final class Dashboard implements Listener {
         @Override public Inventory getInventory() { return inventory; }
     }
     void open(Player player) {
+        if (!player.hasPermission("aurora.use")) {
+            plugin.failure(player, new dev.aurora.economy.core.EconomyException(dev.aurora.economy.core.EconomyException.Code.FORBIDDEN, "Missing permission: aurora.use"));
+            return;
+        }
         Session session = new Session(player.getUniqueId());
         session.inventory = Bukkit.createInventory(session, 45, Component.text("Aurora • Financial Observatory", NamedTextColor.DARK_AQUA));
         for (int i = 0; i < 45; i++) session.inventory.setItem(i, icon(Material.GRAY_STAINED_GLASS_PANE, " ", List.of()));
@@ -79,7 +83,18 @@ final class Dashboard implements Listener {
             case 34 -> "eco help";
             default -> null;
         };
-        if (command != null) { player.closeInventory(); player.performCommand(command); }
+        if (command != null) {
+            // InventoryClickEvent forbids changing the open view during its own transaction.
+            plugin.nextTick(() -> {
+                if (!player.isOnline() || player.getOpenInventory().getTopInventory().getHolder() != session) return;
+                player.closeInventory(); player.performCommand(command.replace("eco ", "auroraeconomy:economy "));
+            });
+        }
+    }
+    void closeAll() {
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            if (player.getOpenInventory().getTopInventory().getHolder() instanceof Session) player.closeInventory();
+        }
     }
     @EventHandler public void drag(InventoryDragEvent event) {
         if (event.getView().getTopInventory().getHolder() instanceof Session) event.setCancelled(true);

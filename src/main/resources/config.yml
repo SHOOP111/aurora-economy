@@ -3,7 +3,8 @@
 default-currency: COIN
 vault-enabled: true
 # Currency codes: 2-12 ASCII uppercase letters/digits, first character a letter.
-# Amount strings are exact decimals; daily-limit: '0' disables the cap.
+# Amount strings are exact decimals and must be quoted; daily-limit: '0' disables the cap.
+# Integer/boolean settings must use YAML integer/boolean types (no fractions or quoted booleans).
 currencies:
   COIN:
     symbol: '$'
@@ -22,6 +23,7 @@ policy:
   swap-fee-bps: 30
   # Yield is reserved from treasury when a deposit is opened; no unfunded promises.
   savings-apr-bps: 350
+  # Contract quota bounds: 1 to 10000; list views still show at most 100 recent contracts.
   max-active-orders: 10
   max-open-escrows: 20
   max-open-deposits: 20

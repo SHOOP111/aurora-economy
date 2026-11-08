@@ -12,7 +12,7 @@ Include plugin version/commit, Paper and Java versions, minimal configuration, s
 - Per-currency balanced postings and nonnegative spendable/custodial accounts.
 - Serialized atomic writes and unique actor-scoped operation keys.
 - Domain ownership/state/maturity enforcement inside transactions, not merely command permissions.
-- Immutable journal/entry SQL triggers, deterministic chained SHA-256 and deep projection/custody/supply audits.
+- Immutable journal/entry SQL triggers, deterministic chained SHA-256, historical-range/projection/custody/supply audits and immutable-event comparison for custody terms and wallet incident controls.
 - Startup integrity refusal and a runtime audit tripwire that freezes financial writes.
 - Persisted, audited wallet controls for incidents.
 - Required AMM minimum output and actual reserve funding.
@@ -36,11 +36,12 @@ The ledger hash chain is unkeyed. SQL triggers can be removed by host/database a
 
 ## Known limitations
 
+- This hardening pass is static-only: no compilation, tests, packaging verification, load measurement or server execution was performed for these changes. See `docs/REVIEW.md` for scope and remaining risks.
 - New implementation: no independent security audit or long-running production certification.
 - No real Minecraft server/GUI acceptance test has been executed by this project; unit/integration tests use the core and mocked adapters.
 - No network-wide consistency, network-filesystem safety or Folia support.
 - Deep audits and snapshots can delay synchronous Vault calls; there is no demonstrated server-load capacity guarantee.
-- Mutable nonfinancial metadata and every scheduling field are not fully event-rebuilt from journal intents. Host-level table edits remain outside the ordinary player threat boundary.
+- Mutable player metadata and some scheduling fields are not fully event-rebuilt from journal intents. Custody creation terms, wallet controls and successful installment counts now receive additional comparisons, but host-level table edits remain outside the ordinary player threat boundary.
 - Reliable host time is required for UTC budgets, escrow expiry and savings maturity.
 - Legacy Vault doubles lose precision at very large values and cannot express client idempotency; only safe, exact mutation amounts are accepted.
 - Starter grants can be farmed through legitimate alternate UUIDs unless server identity/anti-alt policy prevents it. Changing offline/online mode requires a migration plan.

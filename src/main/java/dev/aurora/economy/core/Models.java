@@ -22,7 +22,14 @@ public final class Models {
                           Instant unlocks, String state) { }
     public record StandingOrder(String id, UUID owner, UUID beneficiary, String currency, long amount,
                                 int feeBps, long intervalSeconds, Instant nextDue, int executions,
-                                int totalExecutions, String state, String reason) { }
+                                int totalExecutions, String state, String reason, long revision) {
+        /** Compatibility constructor for integrations that do not track scheduling revisions. */
+        public StandingOrder(String id, UUID owner, UUID beneficiary, String currency, long amount,
+                             int feeBps, long intervalSeconds, Instant nextDue, int executions,
+                             int totalExecutions, String state, String reason) {
+            this(id, owner, beneficiary, currency, amount, feeBps, intervalSeconds, nextDue, executions, totalExecutions, state, reason, 0);
+        }
+    }
     public record Quote(String from, String to, long input, long output, long reserveIn, long reserveOut,
                         int feeBps, Instant time) { }
     public record WalletControl(UUID owner, boolean frozen, String reason, Instant updated) { }
