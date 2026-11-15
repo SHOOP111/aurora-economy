@@ -26,7 +26,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
-    testImplementation("org.mockito:mockito-core:5.15.2")
+    testImplementation("org.mockito:mockito-core:5.24.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
 }
